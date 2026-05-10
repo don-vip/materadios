@@ -1,21 +1,22 @@
 package eu.materadios.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.auth.oauth2.AccessToken;
-import com.google.auth.oauth2.GoogleCredentials;
-import com.google.auth.oauth2.ServiceAccountCredentials;
-import org.springframework.stereotype.Component;
-
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.time.Instant;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
+
+import org.springframework.stereotype.Component;
+
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.auth.oauth2.AccessToken;
+import com.google.auth.oauth2.GoogleCredentials;
+import com.google.auth.oauth2.ServiceAccountCredentials;
 
 @Component
 public class GoogleCredentialsProvider {

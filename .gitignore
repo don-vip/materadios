@@ -32,3 +32,4 @@ replay_pid*
 # H2 data directory
 data/
 
+/bin/

@@ -1,0 +1,25 @@
+<!doctype html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Matera Debug Env</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.4/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="p-4">
+  <div class="container">
+    <h1>Env / System probe</h1>
+    <p>This shows presence of properties without printing secrets.</p>
+    <table class="table table-bordered">
+      <thead><tr><th>Key</th><th>Value</th></tr></thead>
+      <tbody>
+      <tr th:each="e : ${probe.entrySet()}">
+        <td th:text="${e.key}"></td>
+        <td th:text="${e.value}"></td>
+      </tr>
+      </tbody>
+    </table>
+    <a href="/" class="btn btn-secondary">Back</a>
+  </div>
+</body>
+</html>
