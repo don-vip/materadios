@@ -7,8 +7,12 @@ import java.util.List;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record MailboxThread(boolean archived, List<User> assignees, List<Email> emails, long id, boolean pinned,
-		String project, String state) {
+public record MailboxThread(boolean archived, List<User> assignees, Integer attachments_count, List<Email> emails,
+        long id, boolean pinned, ThreadProject project, Boolean read, String state) {
+
+	@JsonIgnoreProperties(ignoreUnknown = true)
+	public record ThreadProject(long id, String kind, String title) {
+	}
 
 	@JsonIgnoreProperties(ignoreUnknown = true)
 	public record Email(List<Attachment> attachments, Integer attachments_size, List<String> bcc, long building_id,

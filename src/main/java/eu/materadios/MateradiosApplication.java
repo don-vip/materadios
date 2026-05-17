@@ -38,7 +38,7 @@ public class MateradiosApplication {
             if (found != null) {
                 String content = Files.readString(found);
                 Pattern pattern = Pattern
-                        .compile("(?m)(MATERA_[A-Z_]+)\\s*=\\s*(\"([^\"]*)\"|'([^']*)'|([^\\r\\n#]+))");
+                        .compile("(?m)((?:MATERA|GOOGLE)_[A-Z_]+)\\s*=\\s*(\"([^\"]*)\"|'([^']*)'|([^\\r\\n#]+))");
                 Matcher m = pattern.matcher(content);
                 while (m.find()) {
                     String key = m.group(1);
@@ -62,7 +62,7 @@ public class MateradiosApplication {
                     else if ("MATERA_API_URL".equals(key))
                         prop = "matera.api.url";
                     else
-                        prop = key.toLowerCase().replace('_', '.');
+                        prop = key;
                     System.setProperty(prop, val);
                 }
                 System.out.println("Loaded .env into system properties from: " + found.toString());

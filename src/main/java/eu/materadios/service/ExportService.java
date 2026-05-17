@@ -10,7 +10,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
@@ -28,6 +35,7 @@ import eu.materadios.api.MailboxThread;
 import eu.materadios.model.ExportedItem;
 import eu.materadios.model.MailboxExportMetadata;
 import eu.materadios.repository.ExportedItemRepository;
+import eu.materadios.repository.ProjectLabelRepository;
 import tools.jackson.databind.ObjectMapper;
 
 @Service
@@ -35,15 +43,20 @@ public class ExportService {
 
     private static final Logger log = LoggerFactory.getLogger(ExportService.class);
 
+    private static final DateTimeFormatter RFC_2822 =
+            DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss Z", Locale.ENGLISH);
+
     private final ExportedItemRepository repository;
+    private final ProjectLabelRepository projectLabelRepository;
     private final MateraApiService materaApiService;
     private final GoogleService googleService;
     @Autowired
     private ExportService self;
 
-    public ExportService(ExportedItemRepository repository, MateraApiService materaApiService,
-            GoogleService googleService) {
+    public ExportService(ExportedItemRepository repository, ProjectLabelRepository projectLabelRepository,
+            MateraApiService materaApiService, GoogleService googleService) {
         this.repository = repository;
+        this.projectLabelRepository = projectLabelRepository;
         this.materaApiService = materaApiService;
         this.googleService = googleService;
     }
@@ -53,7 +66,6 @@ public class ExportService {
      */
     @Transactional
     public void exportAllFromMatera() {
-        // TODO: implement Matera API integration
         throw new UnsupportedOperationException("exportAllFromMatera is not implemented yet");
     }
 
@@ -65,20 +77,90 @@ public class ExportService {
 
         ExportedItem e = item.get();
         if (Boolean.TRUE.equals(e.getExported()))
-            return e; // already exported
+            return e;
 
-        // Upload depending on type
         String url;
         if ("DOCUMENT".equalsIgnoreCase(e.getType())) {
             url = googleService.uploadFileToDrive(e.getLocalPath());
+        } else if ("EMAIL".equalsIgnoreCase(e.getType())) {
+            url = exportEmailToGmail(e);
         } else {
-            url = googleService.sendEmailViaGmail(e.getLocalPath());
+            throw new IllegalArgumentException("Cannot export type " + e.getType() + " to Google");
         }
         e.setGoogleUrl(url);
         e.setExported(true);
         e.setExportedAt(Instant.now());
         repository.save(e);
         return e;
+    }
+
+    private String exportEmailToGmail(ExportedItem e) {
+        try {
+            MailboxExportMetadata meta = new ObjectMapper().readValue(e.getMetadataJson(), MailboxExportMetadata.class);
+
+            List<String> labelIds = new ArrayList<>();
+            MailboxThread.Email email = meta.email();
+            boolean isDraft = email != null && Boolean.TRUE.equals(email.draft());
+
+            if (isDraft) {
+                labelIds.add("DRAFT");
+            } else {
+                String kind = email != null ? email.kind() : null;
+                if (kind != null && kind.contains("outbound")) {
+                    labelIds.add("SENT");
+                } else {
+                    labelIds.add("INBOX");
+                }
+                Boolean read = meta.thread() != null ? meta.thread().read() : null;
+                if (Boolean.FALSE.equals(read)) {
+                    labelIds.add("UNREAD");
+                }
+            }
+
+            // Always tag with the migration label
+            labelIds.add(googleService.getMigrationLabelId());
+
+            // Tag with the project label if the thread is linked to a project
+            if (meta.thread() != null && meta.thread().project() != null) {
+                long projectId = meta.thread().project().id();
+                projectLabelRepository.findById(projectId)
+                        .map(pl -> pl.getGmailLabelId())
+                        .filter(id -> id != null && !id.isBlank())
+                        .ifPresent(labelIds::add);
+            }
+
+            return googleService.insertEmailToGmail(e.getLocalPath(), labelIds);
+        } catch (Exception ex) {
+            throw new RuntimeException("Failed to export email to Gmail", ex);
+        }
+    }
+
+    @Transactional
+    public void resetThreadExportedFlag(long threadId) {
+        repository.findByMateraIdStartingWith("mailbox_thread:" + threadId + ":email:").stream()
+                .filter(e -> "EMAIL".equals(e.getType()))
+                .forEach(e -> {
+                    e.setExported(false);
+                    e.setGoogleUrl(null);
+                    e.setExportedAt(null);
+                    repository.save(e);
+                });
+    }
+
+    public void exportThreadToGoogle(long threadId) {
+        String prefix = "mailbox_thread:" + threadId + ":email:";
+        List<ExportedItem> emails = repository.findByMateraIdStartingWith(prefix).stream()
+                .filter(e -> "EMAIL".equals(e.getType()))
+                .sorted(Comparator.comparingLong(e -> Long.parseLong(e.getMateraId().split(":")[3])))
+                .toList();
+        if (emails.isEmpty()) {
+            throw new IllegalArgumentException("No local emails found for thread " + threadId + " — export to disk first");
+        }
+        for (ExportedItem e : emails) {
+            if (!Boolean.TRUE.equals(e.getExported())) {
+                self.exportItemToGoogle(e.getId());
+            }
+        }
     }
 
     public List<ExportedItem> listAll() {
@@ -93,12 +175,6 @@ public class ExportService {
         return repository.findByCreatedAtBetween(start, end);
     }
 
-    /**
-     * Export a mailbox thread and its emails to local disk. Creates one
-     * ExportedItem per email.
-     *
-     * @throws IOException
-     */
     public void exportMailboxThreadToDisk(long threadId) throws IOException {
         MailboxThread thread = materaApiService.getMailboxThread(threadId);
         if (thread == null) {
@@ -107,56 +183,165 @@ public class ExportService {
         self.exportMailboxThread(thread);
     }
 
-    /**
-     * Performs DB writes for a mailbox thread export. This method is transactional.
-     */
     @Transactional
     public void exportMailboxThread(MailboxThread thread) throws IOException {
         long threadId = thread.id();
-
         Path base = Paths.get("data", "exported", "mailbox_threads", String.valueOf(threadId));
         Files.createDirectories(base);
 
         ObjectMapper mapper = new ObjectMapper();
-
         List<MailboxThread.Email> emails = thread.emails();
         if (emails == null)
             return;
 
         for (MailboxThread.Email email : emails) {
-            String fileName = "email-" + email.id() + ".eml";
-            Path file = base.resolve(fileName).toAbsolutePath();
-            String body = email.content_text() != null ? email.content_text() : email.content_html();
-            if (body == null) {
-                body = "";
+            // Download attachments
+            List<String> attLocalPaths = new ArrayList<>();
+            List<MailboxThread.Attachment> downloadedAtts = new ArrayList<>();
+            List<byte[]> downloadedContents = new ArrayList<>();
+
+            List<MailboxThread.Attachment> atts = email.attachments();
+            if (atts != null && !atts.isEmpty()) {
+                Path attDir = base.resolve("email-" + email.id());
+                Files.createDirectories(attDir);
+                for (MailboxThread.Attachment att : atts) {
+                    String filename = sanitizeFilename(att.name());
+                    Path attFile = attDir.resolve(filename).toAbsolutePath();
+                    try {
+                        byte[] content = materaApiService.downloadFile(att.url().toString());
+                        Files.write(attFile, content);
+                        downloadedAtts.add(att);
+                        downloadedContents.add(content);
+                        attLocalPaths.add(attFile.toString());
+
+                        String attMateraId = "mailbox_thread:" + threadId + ":email:" + email.id()
+                                + ":attachment:" + att.id();
+                        ExportedItem attItem = repository.findByMateraId(attMateraId)
+                                .orElse(new ExportedItem());
+                        attItem.setMateraId(attMateraId);
+                        attItem.setType("EMAIL_ATTACHMENT");
+                        attItem.setLocalPath(attFile.toString());
+                        repository.save(attItem);
+                    } catch (Exception ex) {
+                        log.warn("Skipping attachment '{}' for email {}: {}", att.name(), email.id(),
+                                ex.getMessage());
+                    }
+                }
             }
 
-            StringBuilder sb = new StringBuilder();
-            sb.append("From: ").append(
-                    email.from() != null ? email.from() : (email.sender() != null ? email.sender().full_name() : ""))
-                    .append('\n');
-            sb.append("To: ");
-            if (email.recipients() != null) {
-                sb.append(email.recipients().stream().map(r -> r.email() != null ? r.email() : r.full_name())
-                        .collect(joining(",")));
-            }
-            sb.append('\n');
-            sb.append("Subject: ").append(email.subject() != null ? email.subject() : "").append('\n');
-            sb.append("Date: ").append(email.date() != null ? email.date().toString() : "").append('\n');
-            sb.append("MIME-Version: 1.0\n");
-            sb.append("Content-Type: text/plain; charset=utf-8\n\n");
-            sb.append(body).append('\n');
+            // Generate MIME EML embedding all attachments
+            Path file = base.resolve("email-" + email.id() + ".eml").toAbsolutePath();
+            Files.write(file, buildEml(email, downloadedAtts, downloadedContents));
 
-            Files.write(file, sb.toString().getBytes(UTF_8));
-
-            ExportedItem it = new ExportedItem();
-            it.setMateraId("mailbox_thread:" + threadId + ":email:" + email.id());
+            String emailMateraId = "mailbox_thread:" + threadId + ":email:" + email.id();
+            ExportedItem it = repository.findByMateraId(emailMateraId).orElse(new ExportedItem());
+            it.setMateraId(emailMateraId);
             it.setType("EMAIL");
             it.setLocalPath(file.toString());
-            it.setMetadataJson(mapper.writeValueAsString(new MailboxExportMetadata(thread, email)));
-
+            it.setMetadataJson(mapper.writeValueAsString(new MailboxExportMetadata(thread, email, attLocalPaths)));
+            // Reset export state so the fresh EML can be re-imported to Gmail
+            it.setExported(false);
+            it.setGoogleUrl(null);
+            it.setExportedAt(null);
             repository.save(it);
         }
+    }
+
+    private static byte[] buildEml(MailboxThread.Email email, List<MailboxThread.Attachment> atts,
+            List<byte[]> contents) {
+        boolean hasAtts = !atts.isEmpty();
+        String boundary = "==MATERA_" + email.id() + "_" + System.currentTimeMillis() + "==";
+        StringBuilder sb = new StringBuilder();
+
+        // RFC 2822 headers
+        String fromAddr = email.from();
+        String fromName = email.sender() != null ? email.sender().full_name() : null;
+        if (fromName != null && fromAddr != null) {
+            sb.append("From: ").append(rfc2047Encode(fromName)).append(" <").append(fromAddr).append(">\r\n");
+        } else if (fromAddr != null) {
+            sb.append("From: ").append(fromAddr).append("\r\n");
+        } else if (fromName != null) {
+            sb.append("From: ").append(rfc2047Encode(fromName)).append("\r\n");
+        }
+        if (email.recipients() != null && !email.recipients().isEmpty()) {
+            sb.append("To: ").append(email.recipients().stream()
+                    .map(r -> r.email() != null ? r.email() : r.full_name())
+                    .collect(joining(", "))).append("\r\n");
+        }
+        sb.append("Subject: ").append(rfc2047Encode(email.subject() != null ? email.subject() : ""))
+                .append("\r\n");
+        sb.append("Date: ").append(
+                email.date() != null ? email.date().format(RFC_2822)
+                        : OffsetDateTime.now(ZoneOffset.UTC).format(RFC_2822))
+                .append("\r\n");
+        sb.append("MIME-Version: 1.0\r\n");
+        sb.append("Message-ID: <matera-").append(email.id()).append("@matera.eu>\r\n");
+        if (email.references() != null && !email.references().isBlank()) {
+            sb.append("References: ").append(email.references()).append("\r\n");
+        }
+        sb.append("X-Matera-Thread-Id: ").append(email.thread_id()).append("\r\n");
+        sb.append("X-Matera-Message-Id: ").append(email.id()).append("\r\n");
+        sb.append("X-Matera-Building-Id: ").append(email.building_id()).append("\r\n");
+
+        if (hasAtts) {
+            sb.append("Content-Type: multipart/mixed; boundary=\"").append(boundary).append("\"\r\n\r\n");
+            if (email.content_text() != null || email.content_html() != null) {
+                sb.append("--").append(boundary).append("\r\n");
+                appendBodyPart(sb, email);
+            }
+            for (int i = 0; i < atts.size(); i++) {
+                MailboxThread.Attachment att = atts.get(i);
+                byte[] content = contents.get(i);
+                String ct = att.content_type() != null ? att.content_type() : "application/octet-stream";
+                String fname = asciiFilename(att.name());
+                sb.append("--").append(boundary).append("\r\n");
+                sb.append("Content-Type: ").append(ct).append("; name=\"").append(fname).append("\"\r\n");
+                sb.append("Content-Transfer-Encoding: base64\r\n");
+                sb.append("Content-Disposition: attachment; filename=\"").append(fname).append("\"\r\n\r\n");
+                sb.append(Base64.getMimeEncoder(76, "\r\n".getBytes(UTF_8)).encodeToString(content));
+                sb.append("\r\n");
+            }
+            sb.append("--").append(boundary).append("--\r\n");
+        } else {
+            appendBodyPart(sb, email);
+        }
+
+        return sb.toString().getBytes(UTF_8);
+    }
+
+    private static void appendBodyPart(StringBuilder sb, MailboxThread.Email email) {
+        byte[] body;
+        String ct;
+        if (email.content_text() != null) {
+            body = email.content_text().getBytes(UTF_8);
+            ct = "text/plain";
+        } else if (email.content_html() != null) {
+            body = email.content_html().getBytes(UTF_8);
+            ct = "text/html";
+        } else {
+            return;
+        }
+        sb.append("Content-Type: ").append(ct).append("; charset=utf-8\r\n");
+        sb.append("Content-Transfer-Encoding: base64\r\n\r\n");
+        sb.append(Base64.getMimeEncoder(76, "\r\n".getBytes(UTF_8)).encodeToString(body));
+        sb.append("\r\n");
+    }
+
+    private static String rfc2047Encode(String value) {
+        if (value == null)
+            return "";
+        for (char c : value.toCharArray()) {
+            if (c > 127) {
+                return "=?UTF-8?B?" + Base64.getEncoder().encodeToString(value.getBytes(UTF_8)) + "?=";
+            }
+        }
+        return value;
+    }
+
+    private static String asciiFilename(String name) {
+        if (name == null)
+            return "attachment";
+        return name.replaceAll("[^\\x20-\\x7E]", "_").replaceAll("[\\\\/:*?\"<>|]", "_");
     }
 
     public void exportDocumentToDisk(long documentId) throws IOException {
@@ -220,10 +405,8 @@ public class ExportService {
     }
 
     private static String sanitizeFilename(String name) {
-        // Replace characters forbidden on Windows/Linux filesystems
         String s = name.replaceAll("[\\\\/:*?\"<>|\\r\\n\\t]", "_");
         s = s.replaceAll("_+", "_").strip();
-        // Remove leading/trailing dots (hidden files on Linux, invalid on Windows)
         s = s.replaceAll("^[.]+|[.]+$", "");
         return s.isEmpty() ? "unnamed" : s;
     }
@@ -232,7 +415,6 @@ public class ExportService {
         if (file == null || file.url() == null) {
             return "";
         }
-        // Strip query string and grab the last path segment
         String path = file.url().split("\\?")[0];
         int lastSlash = path.lastIndexOf('/');
         if (lastSlash >= 0) {
@@ -277,9 +459,6 @@ public class ExportService {
         Files.delete(path);
     }
 
-    /**
-     * Return set of exported mailbox thread ids (extracted from materaId pattern).
-     */
     public Set<Long> exportedMailboxThreadIds() {
         List<ExportedItem> items = repository.findByMateraIdStartingWith("mailbox_thread:");
         Set<Long> s = new TreeSet<>();

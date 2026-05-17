@@ -1,14 +1,23 @@
 package eu.materadios.controller;
 
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -24,34 +33,110 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 import eu.materadios.api.Building;
 import eu.materadios.api.BuildingCharac;
 import eu.materadios.api.BuildingConfig;
-import eu.materadios.api.Document;
 import eu.materadios.api.DocumentFolder;
 import eu.materadios.api.DocumentsResponse;
 import eu.materadios.api.ElectronicLettersResponse;
 import eu.materadios.api.LettersResponse;
+import eu.materadios.api.MailboxInfo;
+import eu.materadios.api.MailboxThread;
 import eu.materadios.api.MailboxThreadsResponse;
 import eu.materadios.api.PrivateTopicsResponse;
+import eu.materadios.api.Project;
 import eu.materadios.api.TopicsResponse;
 import eu.materadios.model.ExportedItem;
+import eu.materadios.model.ProjectLabel;
+import eu.materadios.repository.ProjectLabelRepository;
 import eu.materadios.service.ExportService;
+import eu.materadios.service.GoogleService;
 import eu.materadios.service.MateraApiService;
 
 @Controller
 public class WebController {
 
+    private static final Logger log = LoggerFactory.getLogger(WebController.class);
+
+    public record ThreadGroup(long threadId, String subject, int emailCount, boolean allExported) {}
+
     private final ExportService exportService;
-
     private final MateraApiService materaApiService;
+    private final GoogleService googleService;
+    private final ProjectLabelRepository projectLabelRepository;
 
-    public WebController(ExportService exportService, MateraApiService materaApiService) {
+    public WebController(ExportService exportService, MateraApiService materaApiService,
+            GoogleService googleService, ProjectLabelRepository projectLabelRepository) {
         this.exportService = exportService;
         this.materaApiService = materaApiService;
+        this.googleService = googleService;
+        this.projectLabelRepository = projectLabelRepository;
     }
 
     @GetMapping("/")
-    public String index(Model model) {
-        model.addAttribute("items", exportService.listAll());
+    public String index(
+            @RequestParam(value = "tab", required = false, defaultValue = "email") String tab,
+            @RequestParam(value = "filter", required = false, defaultValue = "pending") String filter,
+            Model model) {
+        List<eu.materadios.model.ExportedItem> all = exportService.listAll();
+
+        // Email threads tab
+        Map<Long, List<eu.materadios.model.ExportedItem>> byThread = new LinkedHashMap<>();
+        for (eu.materadios.model.ExportedItem e : all) {
+            if ("EMAIL".equals(e.getType())) {
+                long tid = Long.parseLong(e.getMateraId().split(":")[1]);
+                byThread.computeIfAbsent(tid, _ -> new ArrayList<>()).add(e);
+            }
+        }
+        List<ThreadGroup> threadGroups = byThread.entrySet().stream()
+                .map(entry -> {
+                    long tid = entry.getKey();
+                    List<eu.materadios.model.ExportedItem> items = entry.getValue();
+                    boolean allExp = items.stream().allMatch(e -> Boolean.TRUE.equals(e.getExported()));
+                    String subject = items.stream().map(WebController::extractSubject)
+                            .filter(s -> !"(no subject)".equals(s)).findFirst().orElse("(no subject)");
+                    return new ThreadGroup(tid, subject, items.size(), allExp);
+                })
+                .filter(tg -> "exported".equals(filter) ? tg.allExported() : !tg.allExported())
+                .toList();
+
+        // Documents tab
+        List<eu.materadios.model.ExportedItem> documents = all.stream()
+                .filter(e -> "DOCUMENT".equals(e.getType()))
+                .filter(e -> "exported".equals(filter)
+                        ? Boolean.TRUE.equals(e.getExported()) : !Boolean.TRUE.equals(e.getExported()))
+                .toList();
+
+        // Attachments tab (informational, no export button)
+        List<eu.materadios.model.ExportedItem> attachments = all.stream()
+                .filter(e -> "EMAIL_ATTACHMENT".equals(e.getType())).toList();
+
+        long emailTotal = all.stream().filter(e -> "EMAIL".equals(e.getType())).count();
+        long docTotal = all.stream().filter(e -> "DOCUMENT".equals(e.getType())).count();
+        long attTotal = all.stream().filter(e -> "EMAIL_ATTACHMENT".equals(e.getType())).count();
+
+        model.addAttribute("tab", tab);
+        model.addAttribute("filter", filter);
+        model.addAttribute("threadGroups", threadGroups);
+        model.addAttribute("documents", documents);
+        model.addAttribute("attachments", attachments);
+        model.addAttribute("emailTotal", emailTotal);
+        model.addAttribute("docTotal", docTotal);
+        model.addAttribute("attTotal", attTotal);
         return "index";
+    }
+
+    private static String stackTrace(Throwable ex) {
+        StringWriter sw = new StringWriter();
+        ex.printStackTrace(new PrintWriter(sw));
+        return sw.toString();
+    }
+
+    private static String extractSubject(eu.materadios.model.ExportedItem item) {
+        String json = item.getMetadataJson();
+        if (json == null) return "(no subject)";
+        int idx = json.indexOf("\"subject\":\"");
+        if (idx < 0) return "(no subject)";
+        int start = idx + 11;
+        int end = json.indexOf('"', start);
+        return end > start ? json.substring(start, end) : "(no subject)";
     }
 
     @GetMapping("/files/{id}")
@@ -146,28 +231,40 @@ public class WebController {
         return "electronic_letters";
     }
 
-    @GetMapping("/matera/mailbox/info")
-    public String mailboxInfo(Model model) {
+    @GetMapping("/matera/mails")
+    public String mails(@RequestParam(value = "tab", required = false) String tab,
+            @RequestParam(value = "after", required = false) String after,
+            @RequestParam(value = "threadId", required = false) Long threadId, Model model) {
+        if (tab == null || tab.isBlank()) tab = "inbox";
+        if (after != null && after.isBlank()) after = null;
+        model.addAttribute("tab", tab);
         try {
-            model.addAttribute("info", materaApiService.getMailboxInfo());
+            MailboxInfo info = materaApiService.getMailboxInfo();
+            model.addAttribute("mailboxEmail", info.mailbox_email_address());
+            MailboxThreadsResponse resp = materaApiService.getMailboxThreads(tab, after);
+            model.addAttribute("threads", deduplicateThreads(resp.results()));
+            model.addAttribute("meta", resp.meta());
+            model.addAttribute("exportedThreads", exportService.exportedMailboxThreadIds());
+            if (threadId != null) {
+                MailboxThread thread = materaApiService.getMailboxThread(threadId);
+                model.addAttribute("selectedThread", thread);
+                model.addAttribute("threadId", threadId);
+            }
         } catch (Exception ex) {
             model.addAttribute("error", ex.getMessage());
         }
-        return "mailbox_info";
+        return "mails";
     }
 
-    @GetMapping("/matera/mailbox/threads")
-    public String mailboxThreads(@RequestParam(value = "after", required = false) String after, Model model) {
-        try {
-            MailboxThreadsResponse resp = materaApiService.getMailboxThreads(after);
-            model.addAttribute("threads", resp.results());
-            model.addAttribute("meta", resp.meta());
-            model.addAttribute("after", after);
-            model.addAttribute("exportedThreads", exportService.exportedMailboxThreadIds());
-        } catch (Exception ex) {
-            model.addAttribute("error", ex.getMessage());
+    private static List<MailboxThread> deduplicateThreads(List<MailboxThread> threads) {
+        Set<Long> seen = new HashSet<>();
+        List<MailboxThread> result = new ArrayList<>();
+        for (MailboxThread t : threads) {
+            if (seen.add(t.id())) {
+                result.add(t);
+            }
         }
-        return "mailbox_threads";
+        return result;
     }
 
     @GetMapping("/matera/meters")
@@ -213,14 +310,77 @@ public class WebController {
         return "private_topics";
     }
 
+    public record ProjectWithLabel(Project project, ProjectLabel label) {}
+
     @GetMapping("/matera/projects")
     public String projects(Model model) {
         try {
-            model.addAttribute("projects", materaApiService.getProjects());
+            List<Project> projects = materaApiService.getProjects();
+            List<ProjectWithLabel> withLabels = projects.stream()
+                    .map(p -> new ProjectWithLabel(p, projectLabelRepository.findById(p.id()).orElse(null)))
+                    .toList();
+            model.addAttribute("projects", withLabels);
+            model.addAttribute("parentLabel", googleService.getProjectsParentLabel());
         } catch (Exception ex) {
             model.addAttribute("error", ex.getMessage());
         }
         return "projects";
+    }
+
+    @PostMapping("/sync/gmail/labels/project/{id}")
+    public String syncProjectLabel(@PathVariable long id, RedirectAttributes ra) {
+        try {
+            List<Project> projects = materaApiService.getProjects();
+            Project project = projects.stream().filter(p -> p.id() == id).findFirst()
+                    .orElseThrow(() -> new IllegalArgumentException("Project not found: " + id));
+            String labelId = googleService.ensureProjectLabel(project.title());
+            ProjectLabel pl = projectLabelRepository.findById(id).orElse(new ProjectLabel());
+            pl.setProjectId(id);
+            pl.setProjectTitle(project.title());
+            pl.setGmailLabelId(labelId);
+            pl.setGmailLabelName(googleService.buildProjectLabelName(project.title()));
+            pl.setSyncedAt(java.time.Instant.now());
+            projectLabelRepository.save(pl);
+            ra.addFlashAttribute("message", "Label Gmail créé/vérifié pour : " + project.title());
+        } catch (Exception ex) {
+            log.error("syncProjectLabel {} failed", id, ex);
+            ra.addFlashAttribute("error", "Sync failed: " + ex.getMessage());
+            ra.addFlashAttribute("errorDetail", stackTrace(ex));
+        }
+        return "redirect:/matera/projects";
+    }
+
+    @PostMapping("/sync/gmail/labels/projects")
+    public String syncAllProjectLabels(RedirectAttributes ra) {
+        try {
+            List<Project> projects = materaApiService.getProjects();
+            // Fetch existing Gmail labels once to avoid N API calls
+            var existingLabels = googleService.listGmailLabels();
+            int created = 0;
+            int existing = 0;
+            for (Project project : projects) {
+                String labelName = googleService.buildProjectLabelName(project.title());
+                String labelId = existingLabels.containsKey(labelName)
+                        ? existingLabels.get(labelName)
+                        : googleService.createGmailLabel(labelName);
+                boolean isNew = !existingLabels.containsKey(labelName);
+                ProjectLabel pl = projectLabelRepository.findById(project.id()).orElse(new ProjectLabel());
+                pl.setProjectId(project.id());
+                pl.setProjectTitle(project.title());
+                pl.setGmailLabelId(labelId);
+                pl.setGmailLabelName(labelName);
+                pl.setSyncedAt(java.time.Instant.now());
+                projectLabelRepository.save(pl);
+                if (isNew) created++; else existing++;
+            }
+            ra.addFlashAttribute("message",
+                    created + " label(s) créé(s), " + existing + " déjà existant(s).");
+        } catch (Exception ex) {
+            log.error("syncAllProjectLabels failed", ex);
+            ra.addFlashAttribute("error", "Sync failed: " + ex.getMessage());
+            ra.addFlashAttribute("errorDetail", stackTrace(ex));
+        }
+        return "redirect:/matera/projects";
     }
 
     @GetMapping("/matera/tenants")
@@ -252,7 +412,9 @@ public class WebController {
             exportService.exportAllFromMatera();
             ra.addFlashAttribute("message", "Started export job (see logs). TODO: implement progress reporting.");
         } catch (Exception ex) {
+            log.error("exportAll failed", ex);
             ra.addFlashAttribute("error", "Export failed to start: " + ex.getMessage());
+            ra.addFlashAttribute("errorDetail", stackTrace(ex));
         }
         return "redirect:/";
     }
@@ -263,9 +425,39 @@ public class WebController {
             exportService.exportItemToGoogle(id);
             ra.addFlashAttribute("message", "Started export for item " + id + ".");
         } catch (Exception ex) {
+            log.error("exportItem {} failed", id, ex);
             ra.addFlashAttribute("error", "Export failed: " + ex.getMessage());
+            ra.addFlashAttribute("errorDetail", stackTrace(ex));
         }
         return "redirect:/";
+    }
+
+    @PostMapping("/admin/reset/thread/{threadId}")
+    public String resetThreadExported(@PathVariable long threadId, RedirectAttributes ra) {
+        try {
+            exportService.resetThreadExportedFlag(threadId);
+            ra.addFlashAttribute("message", "Thread " + threadId + " reset — re-export to disk then import to Gmail.");
+        } catch (Exception ex) {
+            log.error("resetThreadExported {} failed", threadId, ex);
+            ra.addFlashAttribute("error", "Reset failed: " + ex.getMessage());
+            ra.addFlashAttribute("errorDetail", stackTrace(ex));
+        }
+        return "redirect:/?tab=email&filter=pending";
+    }
+
+    @PostMapping("/export/google/thread/{threadId}")
+    public String exportGoogleThread(@PathVariable long threadId,
+            @RequestParam(value = "filter", required = false, defaultValue = "pending") String filter,
+            RedirectAttributes ra) {
+        try {
+            exportService.exportThreadToGoogle(threadId);
+            ra.addFlashAttribute("message", "Thread " + threadId + " exported to Gmail.");
+        } catch (Exception ex) {
+            log.error("exportGoogleThread {} failed", threadId, ex);
+            ra.addFlashAttribute("error", "Export failed: " + ex.getMessage());
+            ra.addFlashAttribute("errorDetail", stackTrace(ex));
+        }
+        return "redirect:/?tab=email&filter=" + filter;
     }
 
     @PostMapping("/export/mailbox/thread/{threadId}")
@@ -274,9 +466,11 @@ public class WebController {
             exportService.exportMailboxThreadToDisk(threadId);
             ra.addFlashAttribute("message", "Started export for mailbox thread " + threadId + ".");
         } catch (Exception ex) {
+            log.error("exportMailboxThread {} failed", threadId, ex);
             ra.addFlashAttribute("error", "Export failed: " + ex.getMessage());
+            ra.addFlashAttribute("errorDetail", stackTrace(ex));
         }
-        return "redirect:/matera/mailbox/threads";
+        return "redirect:/matera/mails";
     }
 
     @PostMapping("/export/batch")
@@ -288,11 +482,12 @@ public class WebController {
             Instant s = start.toInstant(ZoneOffset.UTC);
             Instant e = end.toInstant(ZoneOffset.UTC);
             List<ExportedItem> items = exportService.listByRange(s, e);
-            // TODO: kick background batch export for selected items
             ra.addFlashAttribute("message",
                     "Scheduled batch export for " + items.size() + " items. TODO: implement batch processing.");
         } catch (Exception ex) {
+            log.error("exportBatch failed", ex);
             ra.addFlashAttribute("error", "Batch export failed: " + ex.getMessage());
+            ra.addFlashAttribute("errorDetail", stackTrace(ex));
         }
         return "redirect:/";
     }
@@ -303,7 +498,9 @@ public class WebController {
             exportService.purgeDatabase();
             ra.addFlashAttribute("message", "Local database purged.");
         } catch (Exception ex) {
+            log.error("purgeDatabase failed", ex);
             ra.addFlashAttribute("error", "Database purge failed: " + ex.getMessage());
+            ra.addFlashAttribute("errorDetail", stackTrace(ex));
         }
         return "redirect:/";
     }
@@ -314,7 +511,9 @@ public class WebController {
             exportService.purgeLocalFiles();
             ra.addFlashAttribute("message", "Local files purged.");
         } catch (Exception ex) {
+            log.error("purgeFiles failed", ex);
             ra.addFlashAttribute("error", "File purge failed: " + ex.getMessage());
+            ra.addFlashAttribute("errorDetail", stackTrace(ex));
         }
         return "redirect:/";
     }
@@ -350,7 +549,9 @@ public class WebController {
             exportService.exportDocumentToDisk(id);
             ra.addFlashAttribute("message", "Document exported.");
         } catch (Exception ex) {
+            log.error("exportDocument {} failed", id, ex);
             ra.addFlashAttribute("error", "Export failed: " + ex.getMessage());
+            ra.addFlashAttribute("errorDetail", stackTrace(ex));
         }
         return buildDocumentsRedirect(folderId, folderName);
     }
@@ -363,7 +564,9 @@ public class WebController {
             exportService.exportDocumentFolderToDisk(folderId);
             ra.addFlashAttribute("message", "Folder exported recursively.");
         } catch (Exception ex) {
+            log.error("exportDocumentFolder {} failed", folderId, ex);
             ra.addFlashAttribute("error", "Folder export failed: " + ex.getMessage());
+            ra.addFlashAttribute("errorDetail", stackTrace(ex));
         }
         return buildDocumentsRedirect(folderId, folderName);
     }

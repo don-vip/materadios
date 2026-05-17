@@ -5,93 +5,237 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Matera Exporter</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
 </head>
 <body>
-<div class="container py-4">
-    <h1>Matera Exporter</h1>
+<div class="container-fluid py-3">
 
-    <div th:if="${message}" class="alert alert-success" th:text="${message}"></div>
-    <div th:if="${error}" class="alert alert-danger" th:text="${error}"></div>
-
-    <form method="post" action="/export/all" style="display:inline">
-        <button type="submit" class="btn btn-primary mb-3">Export all from Matera (TODO)</button>
-    </form>
-    <a class="btn btn-outline-secondary mb-3 ms-2" href="/matera/context">View Matera Context</a>
-    <form method="post" action="/admin/purge/database" style="display:inline"
-          onsubmit="return confirm('Delete all records from the local database?')">
-        <button type="submit" class="btn btn-danger mb-3 ms-2">Purge database</button>
-    </form>
-    <form method="post" action="/admin/purge/files" style="display:inline"
-          onsubmit="return confirm('Delete all locally exported files?')">
-        <button type="submit" class="btn btn-danger mb-3 ms-2">Purge local files</button>
-    </form>
-
-    <div class="mb-3">
-      <a class="btn btn-sm btn-outline-primary me-1" href="/matera/documents">Documents</a>
-      <a class="btn btn-sm btn-outline-primary me-1" href="/matera/building">Building</a>
-      <a class="btn btn-sm btn-outline-primary me-1" href="/matera/exercices">Exercices</a>
-      <a class="btn btn-sm btn-outline-primary me-1" href="/matera/letters">Letters</a>
-      <a class="btn btn-sm btn-outline-primary me-1" href="/matera/electronic_letters">Electronic Letters</a>
-      <a class="btn btn-sm btn-outline-primary me-1" href="/matera/mailbox/info">Mailbox Info</a>
-      <a class="btn btn-sm btn-outline-primary me-1" href="/matera/mailbox/threads">Mailbox Threads</a>
-      <a class="btn btn-sm btn-outline-primary me-1" href="/matera/meters">Meters</a>
-      <a class="btn btn-sm btn-outline-primary me-1" href="/matera/mutations">Mutations</a>
-      <a class="btn btn-sm btn-outline-primary me-1" href="/matera/owners">Owners</a>
-      <a class="btn btn-sm btn-outline-primary me-1" href="/matera/private_topics">Private Topics</a>
-      <a class="btn btn-sm btn-outline-primary me-1" href="/matera/projects">Projects</a>
-      <a class="btn btn-sm btn-outline-primary me-1" href="/matera/suppliers">Suppliers</a>
-      <a class="btn btn-sm btn-outline-primary me-1" href="/matera/tenants">Tenants</a>
-      <a class="btn btn-sm btn-outline-primary me-1" href="/matera/topics">Topics</a>
+    <div class="d-flex align-items-center gap-3 mb-3">
+        <h4 class="mb-0"><i class="bi bi-cloud-arrow-up me-2"></i>Matera Exporter</h4>
+        <div class="ms-auto d-flex gap-2 flex-wrap">
+            <a class="btn btn-sm btn-outline-secondary" href="/matera/documents"><i class="bi bi-folder me-1"></i>Documents</a>
+            <a class="btn btn-sm btn-outline-secondary" href="/matera/mails"><i class="bi bi-envelope me-1"></i>Mails</a>
+            <a class="btn btn-sm btn-outline-secondary" href="/matera/building">Building</a>
+            <a class="btn btn-sm btn-outline-secondary" href="/matera/exercices">Exercices</a>
+            <a class="btn btn-sm btn-outline-secondary" href="/matera/letters">Letters</a>
+            <a class="btn btn-sm btn-outline-secondary" href="/matera/electronic_letters">E-Letters</a>
+            <a class="btn btn-sm btn-outline-secondary" href="/matera/meters">Meters</a>
+            <a class="btn btn-sm btn-outline-secondary" href="/matera/mutations">Mutations</a>
+            <a class="btn btn-sm btn-outline-secondary" href="/matera/owners">Owners</a>
+            <a class="btn btn-sm btn-outline-secondary" href="/matera/private_topics">Private Topics</a>
+            <a class="btn btn-sm btn-outline-secondary" href="/matera/projects">Projects</a>
+            <a class="btn btn-sm btn-outline-secondary" href="/matera/suppliers">Suppliers</a>
+            <a class="btn btn-sm btn-outline-secondary" href="/matera/tenants">Tenants</a>
+            <a class="btn btn-sm btn-outline-secondary" href="/matera/topics">Topics</a>
+            <a class="btn btn-sm btn-outline-secondary" href="/matera/context">Context</a>
+        </div>
     </div>
 
-    <h2>Exported items</h2>
-    <table class="table table-striped">
-        <thead>
-        <tr>
-            <th>ID</th>
-            <th>Type</th>
-            <th>Matera ID</th>
-            <th>Local file</th>
-            <th>Exported</th>
-            <th>Google link</th>
-            <th>Actions</th>
-        </tr>
-        </thead>
-        <tbody>
-        <tr th:each="item : ${items}">
-            <td th:text="${item.id}"></td>
-            <td th:text="${item.type}"></td>
-            <td th:text="${item.materaId}"></td>
-            <td>
-                <a th:href="@{/files/{id}(id=${item.id})}" th:text="${item.localPath}" target="_blank"></a>
-            </td>
-            <td th:text="${item.exported}"></td>
-            <td>
-                <a th:if="${item.googleUrl}" th:href="${item.googleUrl}" th:text="${item.googleUrl}" target="_blank"></a>
-            </td>
-            <td>
-                <form th:action="@{/export/item/{id}(id=${item.id})}" method="post" style="display:inline-block">
-                    <button class="btn btn-sm btn-outline-primary" type="submit">Export to Google (TODO)</button>
-                </form>
-            </td>
-        </tr>
-        </tbody>
-    </table>
+    <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
+        <form method="post" action="/export/all" style="display:inline">
+            <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-cloud-download me-1"></i>Export all from Matera (TODO)</button>
+        </form>
+        <form method="post" action="/admin/purge/database" style="display:inline"
+              onsubmit="return confirm('Delete all records from the local database?')">
+            <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash me-1"></i>Purge DB</button>
+        </form>
+        <form method="post" action="/admin/purge/files" style="display:inline"
+              onsubmit="return confirm('Delete all locally exported files?')">
+            <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash me-1"></i>Purge files</button>
+        </form>
+    </div>
 
-    <h3>Batch export by time range</h3>
-    <form method="post" action="/export/batch" class="row g-3">
-        <div class="col-md-4">
-            <label class="form-label">Start (local date-time)</label>
-            <input name="start" type="datetime-local" class="form-control" required />
+    <div th:if="${message}" class="alert alert-success alert-dismissible py-2" role="alert">
+        <span th:text="${message}"></span>
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    <div th:if="${error}" class="alert alert-danger alert-dismissible py-2" role="alert">
+        <strong th:text="${error}"></strong>
+        <div th:if="${errorDetail}" class="mt-2">
+            <details>
+                <summary class="small text-muted" style="cursor:pointer">Stack trace</summary>
+                <pre class="mt-1 small text-danger-emphasis bg-danger-subtle rounded p-2 overflow-auto"
+                     style="max-height:300px; white-space:pre-wrap; word-break:break-all"
+                     th:text="${errorDetail}"></pre>
+            </details>
         </div>
-        <div class="col-md-4">
-            <label class="form-label">End (local date-time)</label>
-            <input name="end" type="datetime-local" class="form-control" required />
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+
+    <!-- Tabs + filter bar -->
+    <div class="d-flex align-items-center justify-content-between mb-0 border-bottom pb-0">
+        <ul class="nav nav-tabs border-0">
+            <li class="nav-item">
+                <a class="nav-link" th:classappend="${tab == 'email'} ? ' active' : ''"
+                   th:href="@{/(tab='email',filter=${filter})}">
+                    <i class="bi bi-envelope me-1"></i>Email Threads
+                    <span class="badge bg-secondary ms-1" th:text="${emailTotal}"></span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" th:classappend="${tab == 'document'} ? ' active' : ''"
+                   th:href="@{/(tab='document',filter=${filter})}">
+                    <i class="bi bi-file-earmark me-1"></i>Documents
+                    <span class="badge bg-secondary ms-1" th:text="${docTotal}"></span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" th:classappend="${tab == 'attachment'} ? ' active' : ''"
+                   th:href="@{/(tab='attachment',filter=${filter})}">
+                    <i class="bi bi-paperclip me-1"></i>Attachments
+                    <span class="badge bg-secondary ms-1" th:text="${attTotal}"></span>
+                </a>
+            </li>
+        </ul>
+        <!-- Filter toggle (not shown for attachments) -->
+        <div th:unless="${tab == 'attachment'}" class="btn-group btn-group-sm mb-1">
+            <a class="btn btn-outline-warning"
+               th:classappend="${filter == 'pending'} ? ' active' : ''"
+               th:href="@{/(tab=${tab},filter='pending')}">
+                <i class="bi bi-clock me-1"></i>Pending
+            </a>
+            <a class="btn btn-outline-success"
+               th:classappend="${filter == 'exported'} ? ' active' : ''"
+               th:href="@{/(tab=${tab},filter='exported')}">
+                <i class="bi bi-check-circle me-1"></i>On Google
+            </a>
         </div>
-        <div class="col-md-4 align-self-end">
-            <button class="btn btn-secondary" type="submit">Export range (TODO)</button>
+    </div>
+
+    <!-- EMAIL THREADS tab -->
+    <div th:if="${tab == 'email'}" class="mt-2">
+        <div th:if="${#lists.isEmpty(threadGroups)}" class="text-muted text-center py-4">
+            <i class="bi bi-inbox display-5 d-block mb-2"></i>
+            <span th:text="${filter == 'exported'} ? 'No threads exported to Google yet.' : 'All threads have been exported to Google.'"></span>
         </div>
-    </form>
+        <table th:unless="${#lists.isEmpty(threadGroups)}" class="table table-sm table-hover align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>Thread ID</th>
+                    <th>Subject</th>
+                    <th class="text-center">Emails</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+            <tr th:each="tg : ${threadGroups}">
+                <td>
+                    <a th:href="@{/matera/mails(threadId=${tg.threadId})}" target="_blank"
+                       class="text-decoration-none font-monospace small" th:text="${tg.threadId}"></a>
+                </td>
+                <td class="text-truncate" style="max-width:400px" th:text="${tg.subject}"></td>
+                <td class="text-center">
+                    <span class="badge bg-light text-dark border" th:text="${tg.emailCount}"></span>
+                </td>
+                <td>
+                    <span th:if="${tg.allExported}" class="badge bg-success"><i class="bi bi-google me-1"></i>On Google</span>
+                    <span th:unless="${tg.allExported}" class="badge bg-warning text-dark"><i class="bi bi-clock me-1"></i>Pending</span>
+                </td>
+                <td class="text-nowrap">
+                    <!-- Export to Google (pending) -->
+                    <form th:unless="${tg.allExported}"
+                          th:action="@{/export/google/thread/{id}(id=${tg.threadId})}" method="post"
+                          style="display:inline">
+                        <input type="hidden" name="filter" th:value="${filter}" />
+                        <button class="btn btn-sm btn-outline-success" type="submit"
+                                th:title="'Export all ' + ${tg.emailCount} + ' email(s) of this thread to Gmail'">
+                            <i class="bi bi-google me-1"></i>Export to Gmail
+                        </button>
+                    </form>
+                    <!-- Reset (already exported) -->
+                    <form th:if="${tg.allExported}"
+                          th:action="@{/admin/reset/thread/{id}(id=${tg.threadId})}" method="post"
+                          style="display:inline"
+                          onsubmit="return confirm('Reset Gmail export flag? Re-export to disk from the Mails page first, then re-import.')">
+                        <button class="btn btn-sm btn-outline-warning" type="submit" title="Reset export flag to allow re-import">
+                            <i class="bi bi-arrow-counterclockwise me-1"></i>Reset
+                        </button>
+                    </form>
+                    <!-- View in mails page -->
+                    <a th:href="@{/matera/mails(threadId=${tg.threadId})}"
+                       class="btn btn-sm btn-outline-secondary" target="_blank" title="View thread">
+                        <i class="bi bi-eye"></i>
+                    </a>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- DOCUMENTS tab -->
+    <div th:if="${tab == 'document'}" class="mt-2">
+        <div th:if="${#lists.isEmpty(documents)}" class="text-muted text-center py-4">
+            <i class="bi bi-folder display-5 d-block mb-2"></i>
+            <span th:text="${filter == 'exported'} ? 'No documents on Google Drive yet.' : 'All documents have been exported to Drive.'"></span>
+        </div>
+        <table th:unless="${#lists.isEmpty(documents)}" class="table table-sm table-hover align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>ID</th>
+                    <th>Matera ID</th>
+                    <th>Local file</th>
+                    <th>Status</th>
+                    <th>Google</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+            <tr th:each="item : ${documents}">
+                <td th:text="${item.id}" class="small text-muted"></td>
+                <td class="small font-monospace text-truncate" style="max-width:160px" th:text="${item.materaId}"></td>
+                <td class="small text-truncate" style="max-width:260px">
+                    <a th:href="@{/files/{id}(id=${item.id})}" th:text="${item.localPath}" target="_blank"
+                       class="text-decoration-none"></a>
+                </td>
+                <td>
+                    <span th:if="${item.exported}" class="badge bg-success"><i class="bi bi-google me-1"></i>On Drive</span>
+                    <span th:unless="${item.exported}" class="badge bg-warning text-dark"><i class="bi bi-clock me-1"></i>Pending</span>
+                </td>
+                <td>
+                    <a th:if="${item.googleUrl}" th:href="${item.googleUrl}" target="_blank"
+                       class="btn btn-sm btn-link p-0"><i class="bi bi-box-arrow-up-right"></i></a>
+                </td>
+                <td>
+                    <form th:unless="${item.exported}"
+                          th:action="@{/export/item/{id}(id=${item.id})}" method="post" style="display:inline">
+                        <button class="btn btn-sm btn-outline-success" type="submit">
+                            <i class="bi bi-google me-1"></i>Export to Drive
+                        </button>
+                    </form>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- ATTACHMENTS tab -->
+    <div th:if="${tab == 'attachment'}" class="mt-2">
+        <p class="text-muted small">Attachments are exported as part of their parent email thread. They are listed here for reference only.</p>
+        <div th:if="${#lists.isEmpty(attachments)}" class="text-muted text-center py-4">
+            <i class="bi bi-paperclip display-5 d-block mb-2"></i>No attachments exported yet.
+        </div>
+        <table th:unless="${#lists.isEmpty(attachments)}" class="table table-sm table-hover align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>Matera ID</th>
+                    <th>Local file</th>
+                    <th>Download</th>
+                </tr>
+            </thead>
+            <tbody>
+            <tr th:each="item : ${attachments}">
+                <td class="small font-monospace text-truncate" style="max-width:300px" th:text="${item.materaId}"></td>
+                <td class="small text-truncate" style="max-width:360px" th:text="${item.localPath}"></td>
+                <td>
+                    <a th:href="@{/files/{id}(id=${item.id})}" target="_blank"
+                       class="btn btn-sm btn-outline-secondary"><i class="bi bi-download"></i></a>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
 </div>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
 </body>

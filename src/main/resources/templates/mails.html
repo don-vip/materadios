@@ -1,0 +1,306 @@
+<!doctype html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mails</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+<style>
+    html, body { height: 100%; overflow: hidden; }
+    .thread-row { cursor: pointer; }
+    .thread-row:hover td { background-color: #f0f4ff; }
+    .thread-row.table-active td { background-color: #cfe2ff; }
+    .thread-unread td:nth-child(3) { font-weight: 700; }
+    .thread-pane { width: 440px; min-width: 300px; max-width: 50vw; resize: horizontal; display: flex; flex-direction: column; }
+    .email-card { border-left: 3px solid #dee2e6; }
+    .email-card.email-inbound { border-left-color: #0d6efd; }
+    .email-card.email-outbound { border-left-color: #6c757d; }
+    .email-body { white-space: pre-wrap; font-family: inherit; font-size: 0.9rem; max-height: 60vh; overflow-y: auto; }
+    .project-icon { font-size: 1.1rem; cursor: default; }
+    td.col-actions { white-space: nowrap; }
+    .mailbox-address { font-size: 0.85rem; color: #6c757d; }
+    .attachment-card { min-width: 160px; max-width: 240px; }
+    .nav-tabs .nav-link { font-size: 0.78rem; padding: 0.3rem 0.4rem; }
+</style>
+</head>
+<body>
+<div class="d-flex flex-column" style="height:100vh">
+
+    <!-- Top bar -->
+    <div class="d-flex align-items-center gap-3 px-3 py-2 border-bottom bg-light flex-shrink-0">
+        <h5 class="mb-0"><i class="bi bi-envelope me-2"></i>Mails</h5>
+        <span th:if="${mailboxEmail}" class="mailbox-address" th:text="${mailboxEmail}"></span>
+        <div class="ms-auto d-flex align-items-center gap-2">
+            <button onclick="history.back()" class="btn btn-sm btn-outline-secondary">&larr; Previous</button>
+            <a th:if="${meta != null and meta.has_next_page}"
+               th:href="@{/matera/mails(tab=${tab},after=${meta.end_cursor},threadId=${threadId})}"
+               class="btn btn-sm btn-outline-secondary">Next &rarr;</a>
+            <a href="/" class="btn btn-sm btn-secondary">Back</a>
+        </div>
+    </div>
+
+    <div th:if="${error}" class="alert alert-danger m-2 mb-0 flex-shrink-0 py-2">
+        <strong th:text="${error}"></strong>
+        <div th:if="${errorDetail}" class="mt-2">
+            <details>
+                <summary class="small text-muted" style="cursor:pointer">Stack trace</summary>
+                <pre class="mt-1 small text-danger-emphasis bg-danger-subtle rounded p-2 overflow-auto"
+                     style="max-height:240px; white-space:pre-wrap; word-break:break-all"
+                     th:text="${errorDetail}"></pre>
+            </details>
+        </div>
+    </div>
+
+    <!-- Two-pane body -->
+    <div class="d-flex flex-grow-1 overflow-hidden">
+
+        <!-- Left: tabs + thread list -->
+        <div class="thread-pane border-end flex-shrink-0">
+
+            <!-- Tab bar -->
+            <ul class="nav nav-tabs mb-0 flex-shrink-0 px-1 pt-1 bg-light" id="mailTabs">
+                <li class="nav-item">
+                    <a class="nav-link" th:classappend="${tab == 'inbox'}    ? ' active' : ''"
+                       th:href="@{/matera/mails(tab='inbox')}">Inbox</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:classappend="${tab == 'sent'}     ? ' active' : ''"
+                       th:href="@{/matera/mails(tab='sent')}">Sent</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:classappend="${tab == 'drafts'}   ? ' active' : ''"
+                       th:href="@{/matera/mails(tab='drafts')}">Drafts</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:classappend="${tab == 'archived'} ? ' active' : ''"
+                       th:href="@{/matera/mails(tab='archived')}">Archived</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" th:classappend="${tab == 'deleted'}  ? ' active' : ''"
+                       th:href="@{/matera/mails(tab='deleted')}">Deleted</a>
+                </li>
+            </ul>
+
+            <!-- Thread table -->
+            <div class="overflow-auto flex-grow-1">
+                <table class="table table-sm table-hover mb-0">
+                    <tbody>
+                    <tr th:each="t : ${threads}"
+                        class="thread-row"
+                        th:classappend="${t.id == threadId} ? ' table-active' : (${t.read != null and !t.read} ? ' thread-unread' : '')"
+                        th:attr="data-href=@{/matera/mails(threadId=${t.id})}">
+                        <!-- unread dot -->
+                        <td style="width:0.6rem; padding-right:0">
+                            <span th:if="${t.read != null and !t.read}" class="text-primary" title="Unread">&#x25CF;</span>
+                        </td>
+                        <!-- project icon -->
+                        <td style="width:1.4rem; padding:0 2px">
+                            <span th:if="${t.project != null}"
+                                  class="project-icon"
+                                  th:attr="data-project-kind=${t.project.kind}, title=${t.project.title}">
+                            </span>
+                        </td>
+                        <!-- from -->
+                        <td class="text-truncate" style="max-width:110px"
+                            th:text="${t.emails != null and !#lists.isEmpty(t.emails)
+                                ? (t.emails[0].sender != null ? t.emails[0].sender.full_name : t.emails[0].from)
+                                : ''}">
+                        </td>
+                        <!-- subject -->
+                        <td class="text-truncate" style="max-width:180px"
+                            th:text="${t.emails != null and !#lists.isEmpty(t.emails) and t.emails[0].subject != null
+                                ? t.emails[0].subject : '(no subject)'}">
+                        </td>
+                        <!-- attachment icon -->
+                        <td style="width:1.2rem; padding:0">
+                            <span th:if="${t.attachments_count != null and t.attachments_count > 0}"
+                                  class="text-muted" title="Has attachments">
+                                <i class="bi bi-paperclip"></i>
+                            </span>
+                        </td>
+                        <!-- date -->
+                        <td class="text-muted small text-nowrap"
+                            th:text="${t.emails != null and !#lists.isEmpty(t.emails) and t.emails[0].date != null
+                                ? #temporals.format(t.emails[0].date, 'dd/MM/yyyy') : ''}">
+                        </td>
+                        <!-- export -->
+                        <td class="col-actions" onclick="event.stopPropagation()">
+                            <span th:if="${exportedThreads != null and exportedThreads.contains(t.id)}"
+                                  class="badge bg-success"><i class="bi bi-check"></i></span>
+                            <form th:unless="${exportedThreads != null and exportedThreads.contains(t.id)}"
+                                  th:action="@{/export/mailbox/thread/{id}(id=${t.id})}" method="post"
+                                  style="display:inline">
+                                <button class="btn btn-sm btn-outline-success p-0 px-1" type="submit"
+                                        title="Export to disk"><i class="bi bi-download"></i></button>
+                            </form>
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Right: thread detail -->
+        <div class="flex-grow-1 overflow-auto p-3">
+
+            <!-- No thread selected -->
+            <div th:unless="${selectedThread}" class="text-center text-muted mt-5">
+                <i class="bi bi-envelope-open display-4"></i>
+                <p class="mt-3">Select a thread to read</p>
+            </div>
+
+            <!-- Thread detail -->
+            <div th:if="${selectedThread}">
+                <!-- Thread header -->
+                <div class="mb-3 d-flex justify-content-between align-items-start">
+                    <div>
+                        <h5 class="mb-1"
+                            th:text="${selectedThread.emails != null and !#lists.isEmpty(selectedThread.emails)
+                                and selectedThread.emails[0].subject != null
+                                ? selectedThread.emails[0].subject : '(no subject)'}">
+                        </h5>
+                        <div th:if="${selectedThread.project != null}" class="mb-2">
+                            <span class="badge bg-light text-dark border d-inline-flex align-items-center gap-1">
+                                <span class="project-icon"
+                                      th:attr="data-project-kind=${selectedThread.project.kind}"></span>
+                                <span th:text="${selectedThread.project.title}"></span>
+                            </span>
+                        </div>
+                        <div class="small text-muted">
+                            <i class="bi bi-tag me-1"></i><span th:text="${selectedThread.state}"></span>
+                        </div>
+                    </div>
+                    <form th:action="@{/export/mailbox/thread/{id}(id=${selectedThread.id})}" method="post">
+                        <button class="btn btn-sm btn-outline-success" type="submit"
+                                th:disabled="${exportedThreads != null and exportedThreads.contains(selectedThread.id)}">
+                            <i class="bi bi-download me-1"></i>
+                            <span th:if="${exportedThreads != null and exportedThreads.contains(selectedThread.id)}">Exported</span>
+                            <span th:unless="${exportedThreads != null and exportedThreads.contains(selectedThread.id)}">Export</span>
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Email chain -->
+                <div th:each="email : ${selectedThread.emails}"
+                     class="card mb-3 email-card"
+                     th:classappend="${email.kind == 'inbound'} ? ' email-inbound' : ' email-outbound'">
+                    <div class="card-header d-flex justify-content-between py-2">
+                        <div>
+                            <span class="fw-semibold"
+                                  th:text="${email.sender != null ? email.sender.full_name : email.from}"></span>
+                            <span class="text-muted small ms-2"
+                                  th:text="${email.from != null ? '&lt;' + email.from + '&gt;' : ''}"></span>
+                            <div class="small text-muted"
+                                 th:if="${email.recipients != null and !#lists.isEmpty(email.recipients)}">
+                                To:
+                                <span th:each="r, rs : ${email.recipients}"
+                                      th:text="${(r.email != null ? r.email : r.full_name) + (rs.last ? '' : ', ')}"></span>
+                            </div>
+                        </div>
+                        <div class="small text-muted text-nowrap ms-3">
+                            <span th:if="${email.date != null}"
+                                  th:text="${#temporals.format(email.date, 'dd/MM/yyyy HH:mm')}"></span>
+                        </div>
+                    </div>
+
+                    <!-- Attachments -->
+                    <div th:if="${email.attachments != null and !#lists.isEmpty(email.attachments)}"
+                         class="card-body pb-0 pt-2 border-bottom">
+                        <p class="text-muted small mb-2">
+                            <i class="bi bi-paperclip me-1"></i>
+                            <span th:text="${#lists.size(email.attachments)}"></span> attachment(s)
+                        </p>
+                        <div class="d-flex flex-wrap gap-2 mb-3">
+                            <a th:each="att : ${email.attachments}"
+                               th:href="${att.url}"
+                               target="_blank"
+                               class="attachment-card card text-decoration-none text-dark">
+                                <div class="card-body py-2 px-3 d-flex align-items-center gap-2">
+                                    <i class="bi bi-file-earmark fs-3 text-secondary flex-shrink-0"></i>
+                                    <div class="overflow-hidden">
+                                        <div class="fw-semibold small text-truncate" th:text="${att.name}"></div>
+                                        <div class="text-muted" style="font-size:0.72rem"
+                                             th:text="${att.byte_size != null
+                                                 ? #numbers.formatDecimal(att.byte_size / 1024.0, 1, 'COMMA', 1, 'POINT') + ' KB'
+                                                 : att.content_type}"></div>
+                                    </div>
+                                    <i class="bi bi-download text-muted ms-auto flex-shrink-0"></i>
+                                </div>
+                            </a>
+                        </div>
+                    </div>
+
+                    <div class="card-body pt-2">
+                        <pre th:if="${email.content_text != null}" class="email-body mb-0"
+                             th:text="${email.content_text}"></pre>
+                        <div th:if="${email.content_text == null and email.content_html != null}">
+                            <iframe class="email-html-frame w-100 border-0"
+                                    sandbox="allow-same-origin"
+                                    style="min-height:200px"
+                                    th:attr="data-html=${email.content_html}"></iframe>
+                        </div>
+                        <div th:if="${email.content_text == null and email.content_html == null}"
+                             class="text-muted fst-italic small">(no content)</div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    // --- Clickable thread rows (preserve tab + after cursor) ---
+    var params       = new URLSearchParams(window.location.search);
+    var currentTab   = params.get('tab') || 'inbox';
+    var currentAfter = params.get('after');
+
+    document.querySelectorAll('.thread-row[data-href]').forEach(function(row) {
+        row.addEventListener('click', function() {
+            var url = new URL(row.dataset.href, window.location.origin);
+            url.searchParams.set('tab', currentTab);
+            if (currentAfter) url.searchParams.set('after', currentAfter);
+            window.location = url.toString();
+        });
+    });
+
+    // --- Project kind icons ---
+    var PROJECT_ICON_CLASSES = {
+        'damage':       'bi bi-lightning-charge-fill text-danger',
+        'sinistre':     'bi bi-lightning-charge-fill text-danger',
+        'works':        'bi bi-hammer text-warning',
+        'renovation':   'bi bi-hammer text-warning',
+        'legal':        'bi bi-file-earmark-text text-secondary',
+        'contentieux':  'bi bi-file-earmark-text text-secondary',
+        'noise':        'bi bi-volume-up text-info',
+        'conciliation': 'bi bi-people-fill text-primary',
+        'vote':         'bi bi-check2-square text-success',
+        'default':      'bi bi-folder text-muted'
+    };
+    document.querySelectorAll('[data-project-kind]').forEach(function(el) {
+        var kind = el.getAttribute('data-project-kind') || 'default';
+        var cls  = PROJECT_ICON_CLASSES[kind] || PROJECT_ICON_CLASSES['default'];
+        var i = document.createElement('i');
+        i.className = cls;
+        el.appendChild(i);
+    });
+
+    // --- HTML email iframes via blob URL ---
+    document.querySelectorAll('.email-html-frame').forEach(function(frame) {
+        var html = frame.getAttribute('data-html');
+        if (html) {
+            var blob = new Blob([html], { type: 'text/html' });
+            frame.src = URL.createObjectURL(blob);
+            frame.onload = function() {
+                try {
+                    var h = frame.contentDocument.body.scrollHeight;
+                    frame.style.height = Math.min(h + 30, 600) + 'px';
+                } catch(e) {}
+            };
+        }
+    });
+</script>
+</body>
+</html>

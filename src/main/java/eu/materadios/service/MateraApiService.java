@@ -143,10 +143,21 @@ public class MateraApiService {
                 MailboxThread.class);
     }
 
-    public MailboxThreadsResponse getMailboxThreads(String after) {
+    public MailboxThreadsResponse getMailboxThreads(String tab, String after) {
+        String tabFilter = switch (tab) {
+            case "sent"     -> "filters%5Bactive%5D=true&filters%5Boutbox%5D=true";
+            case "drafts"   -> "filters%5Bactive%5D=true&filters%5Bdraft%5D=true";
+            case "archived" -> "filters%5Bactive%5D=false&filters%5Barchived%5D=true";
+            case "deleted"  -> "filters%5Bactive%5D=false&filters%5Btrashbox%5D=true";
+            default         -> "filters%5Bactive%5D=true&filters%5Binbox%5D=true";  // inbox
+        };
         return callApi(
-                "mailbox/threads?includes[assignees][avatar]=true&includes[emails][read_states]=true&includes[emails][recipients][avatar]=true&includes[emails][sender][avatar]=true&includes[project]=true&view=preview"
-                        + paging(25, after),
+                "mailbox/threads?" + tabFilter + "&filters%5Bquery%5D="
+                        + "&includes%5Bassignees%5D%5Bavatar%5D=true"
+                        + "&includes%5Bemails%5D%5Bread_states%5D=true"
+                        + "&includes%5Bemails%5D%5Brecipients%5D%5Bavatar%5D=true"
+                        + "&includes%5Bemails%5D%5Bsender%5D%5Bavatar%5D=true"
+                        + "&includes%5Bproject%5D=true&view=preview" + paging(25, after),
                 MailboxThreadsResponse.class);
     }
 

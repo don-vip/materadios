@@ -1,29 +1,101 @@
 <!doctype html>
-<html>
+<html xmlns:th="http://www.thymeleaf.org">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Projects</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
 </head>
-<body class="p-4">
-<div class="container-fluid">
-  <div class="d-flex justify-content-between align-items-center mb-4">
-    <h1>Projects</h1>
-    <a href="/" class="btn btn-secondary">Back</a>
-  </div>
-  <div th:if="${error}" class="alert alert-danger" th:text="${error}"></div>
-  <div th:if="${projects}">
-    <table class="table table-striped">
-      <thead><tr><th>ID</th><th>Title</th></tr></thead>
-      <tbody>
-        <tr th:each="p : ${projects}">
-          <td th:text="${p.id}"></td>
-          <td th:text="${p.title}"></td>
+<body class="p-3">
+<div class="container-fluid" style="max-width:900px">
+
+    <div class="d-flex align-items-center gap-3 mb-3">
+        <h4 class="mb-0"><i class="bi bi-kanban me-2"></i>Projects</h4>
+        <div class="ms-auto d-flex gap-2">
+            <form method="post" action="/sync/gmail/labels/projects">
+                <button type="submit" class="btn btn-sm btn-outline-primary">
+                    <i class="bi bi-google me-1"></i>Sync all labels → Gmail
+                </button>
+            </form>
+            <a href="/" class="btn btn-sm btn-secondary">Back</a>
+        </div>
+    </div>
+
+    <div th:if="${message}" class="alert alert-success alert-dismissible py-2">
+        <span th:text="${message}"></span>
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    <div th:if="${error}" class="alert alert-danger alert-dismissible py-2">
+        <strong th:text="${error}"></strong>
+        <div th:if="${errorDetail}" class="mt-2">
+            <details>
+                <summary class="small text-muted" style="cursor:pointer">Stack trace</summary>
+                <pre class="mt-1 small text-danger-emphasis bg-danger-subtle rounded p-2 overflow-auto"
+                     style="max-height:200px; white-space:pre-wrap; word-break:break-all"
+                     th:text="${errorDetail}"></pre>
+            </details>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+
+    <p class="text-muted small mb-2">
+        Each project gets a Gmail sub-label under
+        <strong th:text="${parentLabel}"></strong><strong>/</strong>.
+        Use "Sync all" to create all missing labels at once.
+    </p>
+
+    <table class="table table-sm table-hover align-middle">
+        <thead class="table-light">
+            <tr>
+                <th>ID</th>
+                <th>Title</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Gmail label</th>
+                <th>Last sync</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+        <tr th:each="pw : ${projects}">
+            <td class="small text-muted font-monospace" th:text="${pw.project.id}"></td>
+            <td th:text="${pw.project.title}"></td>
+            <td>
+                <span class="badge bg-light text-dark border small" th:text="${pw.project.kind}"></span>
+            </td>
+            <td>
+                <span th:switch="${pw.project.status}">
+                    <span th:case="'active'"   class="badge bg-success">active</span>
+                    <span th:case="'archived'" class="badge bg-secondary">archived</span>
+                    <span th:case="*"          class="badge bg-light text-dark border" th:text="${pw.project.status}"></span>
+                </span>
+            </td>
+            <td>
+                <span th:if="${pw.label != null}" class="d-flex align-items-center gap-1">
+                    <i class="bi bi-check-circle-fill text-success"></i>
+                    <span class="small font-monospace text-muted" th:text="${pw.label.gmailLabelName}"></span>
+                </span>
+                <span th:if="${pw.label == null}" class="text-muted small">—</span>
+            </td>
+            <td class="small text-muted">
+                <span th:if="${pw.label != null}"
+                      th:text="${#temporals.format(pw.label.syncedAt, 'dd/MM/yyyy HH:mm')}"></span>
+            </td>
+            <td>
+                <form th:action="@{/sync/gmail/labels/project/{id}(id=${pw.project.id})}" method="post">
+                    <button type="submit" class="btn btn-sm"
+                            th:classappend="${pw.label != null} ? ' btn-outline-secondary' : ' btn-outline-primary'"
+                            th:title="${pw.label != null} ? 'Re-sync label' : 'Create Gmail label'">
+                        <i class="bi bi-google"></i>
+                        <span th:text="${pw.label != null} ? 'Re-sync' : 'Create label'"></span>
+                    </button>
+                </form>
+            </td>
         </tr>
-      </tbody>
+        </tbody>
     </table>
-  </div>
 </div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

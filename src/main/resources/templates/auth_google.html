@@ -1,0 +1,30 @@
+<!doctype html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+<meta charset="utf-8" />
+<title>Google Auth</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+</head>
+<body>
+<div class="container py-5" style="max-width:600px">
+    <h4><i class="bi bi-google me-2"></i>Google OAuth</h4>
+
+    <div th:if="${error}" class="alert alert-danger mt-3">
+        <strong>Erreur :</strong> <span th:text="${error}"></span>
+    </div>
+
+    <div th:if="${success}" class="alert alert-success mt-3">
+        <i class="bi bi-check-circle me-2"></i>
+        <span th:text="${success}"></span>
+        <div class="mt-2 small font-monospace" th:text="${credPath}"></div>
+    </div>
+
+    <div th:if="${success == null and error == null}" class="alert alert-info mt-3">
+        Redirection vers Google en cours…
+    </div>
+
+    <a href="/" class="btn btn-outline-secondary mt-3">&larr; Retour</a>
+</div>
+</body>
+</html>
