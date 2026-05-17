@@ -10,4 +10,5 @@ import java.util.List;
 @Repository
 public interface ExportedItemRepository extends JpaRepository<ExportedItem, Long> {
     List<ExportedItem> findByCreatedAtBetween(Instant start, Instant end);
+    List<ExportedItem> findByMateraIdStartingWith(String prefix);
 }

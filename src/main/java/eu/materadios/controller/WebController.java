@@ -128,6 +128,7 @@ public class WebController {
             model.addAttribute("threads", resp.results());
             model.addAttribute("meta", resp.meta());
             model.addAttribute("after", after);
+            model.addAttribute("exportedThreads", exportService.exportedMailboxThreadIds());
         } catch (Exception ex) {
             model.addAttribute("error", ex.getMessage());
         }
@@ -230,6 +231,17 @@ public class WebController {
             ra.addFlashAttribute("error", "Export failed: " + ex.getMessage());
         }
         return "redirect:/";
+    }
+
+    @PostMapping("/export/mailbox/thread/{threadId}")
+    public String exportMailboxThread(@PathVariable Long threadId, RedirectAttributes ra) {
+        try {
+            exportService.exportMailboxThreadToDisk(threadId);
+            ra.addFlashAttribute("message", "Started export for mailbox thread " + threadId + ".");
+        } catch (Exception ex) {
+            ra.addFlashAttribute("error", "Export failed: " + ex.getMessage());
+        }
+        return "redirect:/matera/mailbox/threads";
     }
 
     @PostMapping("/export/batch")

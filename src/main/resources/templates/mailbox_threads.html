@@ -24,6 +24,12 @@
           <td th:text="${t.id}"></td>
           <td th:text="${t.emails[0].subject}"></td>
           <td th:text="${t.state}"></td>
+          <td>
+            <form th:action="@{/export/mailbox/thread/{id}(id=${t.id})}" method="post" th:if="${exportedThreads == null or !exportedThreads.contains(t.id)}">
+              <button class="btn btn-sm btn-outline-primary">Export</button>
+            </form>
+            <span th:if="${exportedThreads != null and exportedThreads.contains(t.id)}" class="badge bg-success">Exported</span>
+          </td>
         </tr>
       </tbody>
     </table>
