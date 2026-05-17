@@ -1,0 +1,32 @@
+<!doctype html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Suppliers</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="p-4">
+<div class="container-fluid">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>Suppliers</h1>
+    <a href="/" class="btn btn-secondary">Back</a>
+  </div>
+  <div th:if="${error}" class="alert alert-danger" th:text="${error}"></div>
+  <div th:if="${suppliers}">
+    <table class="table table-striped">
+      <thead><tr><th>ID</th><th>Account holder</th><th>Active</th><th>City</th><th>VAT</th></tr></thead>
+      <tbody>
+        <tr th:each="s : ${suppliers}">
+          <td th:text="${s.id}"></td>
+          <td th:text="${s.account_holder}"></td>
+          <td th:text="${s.active}"></td>
+          <td th:text="${s.address_city}"></td>
+          <td th:text="${s.vat_number}"></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+</body>
+</html>

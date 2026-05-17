@@ -2,6 +2,7 @@ package eu.materadios.api;
 
 import java.net.URL;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -15,7 +16,7 @@ public record Owner(long id, String access_level, boolean accounting_handover_ba
 		OwnerConfig config, String email, String entity_leader_name, String first_name, String full_address,
 		String full_name, String full_name_inverted, String last_name, List<Lot> lots, MainAccount main_account,
 		boolean monthly_payments, List<Object> mutations, String name, String nameless_full_address,
-		String occupation_type, boolean only_send_fund_call_to_agency, boolean other_buildings_lessor,
+		String occupation_type, boolean only_send_fund_call_to_agency, Boolean other_buildings_lessor,
 		String phone_number, boolean physical, Preferences preferences, String role, List<OwnerScope> scopes,
 		String status, String type, boolean valid_address, boolean valid_agency_email, boolean valid_email,
 		String visible_role, WorkFundAccount work_fund_account) {
@@ -28,19 +29,23 @@ public record Owner(long id, String access_level, boolean accounting_handover_ba
 	@JsonIgnoreProperties(ignoreUnknown = true)
 	public record ActiveOrCanceledDirectDebitMandate(long id, boolean active, String address_city,
 			String address_complement, String address_country, String address_street, String address_zipcode,
-			String bic_code, String document, String full_name, String iban_code, String phone_number, String signed_at,
-			String state, String yousign_error_message) {
+			String bic_code, Document document, String full_name, String iban_code, String phone_number,
+			String signed_at, String state, String yousign_error_message) {
+	}
+
+	@JsonIgnoreProperties(ignoreUnknown = true)
+	public record Document(long id, long building_id, File file, String kind, String name) {
+	}
+
+	@JsonIgnoreProperties(ignoreUnknown = true)
+	public record File(OffsetDateTime created_at, String content_type, Integer height, long size, URL url,
+			Integer width) {
 	}
 
 	@JsonIgnoreProperties(ignoreUnknown = true)
 	public record OwnerConfig(long id, boolean can_budget_read, boolean can_message_create,
-			boolean can_private_message_create, boolean can_urgent_ticket_create, Double monthly_direct_debit,
+			boolean can_private_message_create, boolean can_urgent_ticket_create, Boolean monthly_direct_debit,
 			long owner_id, boolean unpaid_automation_email, boolean unpaid_automation_letter) {
-	}
-
-	@JsonIgnoreProperties(ignoreUnknown = true)
-	public record MainAccount(long id, boolean active, double balance, long building_id, String full_title, int number,
-			long parent_id, boolean prepaid_expenses_allowed, String title) {
 	}
 
 	@JsonIgnoreProperties(ignoreUnknown = true)

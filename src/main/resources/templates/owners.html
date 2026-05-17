@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Owners</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="p-4">
+<div class="container-fluid">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>Owners</h1>
+    <a href="/" class="btn btn-secondary">Back</a>
+  </div>
+  <div th:if="${error}" class="alert alert-danger" th:text="${error}"></div>
+  <div th:if="${owners}">
+    <table class="table table-striped">
+      <thead><tr><th>ID</th><th>Name</th><th>Main account balance</th></tr></thead>
+      <tbody>
+        <tr th:each="o : ${owners}">
+          <td th:text="${o.id}"></td>
+          <td th:text="${o.full_name}"></td>
+          <td th:text="${o.main_account != null ? o.main_account.balance : ''}"></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+</body>
+</html>

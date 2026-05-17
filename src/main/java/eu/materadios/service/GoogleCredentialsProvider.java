@@ -3,6 +3,7 @@ package eu.materadios.service;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
@@ -12,11 +13,12 @@ import java.util.Map;
 
 import org.springframework.stereotype.Component;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.auth.oauth2.AccessToken;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.auth.oauth2.ServiceAccountCredentials;
+
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 
 @Component
 public class GoogleCredentialsProvider {
@@ -36,37 +38,34 @@ public class GoogleCredentialsProvider {
             String path = System.getenv("GOOGLE_CREDENTIALS_PATH");
             if (path != null && !path.isBlank()) {
                 // Best-effort: inspect JSON to see if it contains a long-lived access token
-                byte[] raw = java.nio.file.Files.readAllBytes(java.nio.file.Path.of(path));
+				byte[] raw = Files.readAllBytes(java.nio.file.Path.of(path));
                 String text = new String(raw);
                 ObjectMapper om = new ObjectMapper();
-                try {
-                    Map<String, Object> m = om.readValue(text, new TypeReference<Map<String,Object>>() {});
-                    if (m.containsKey("access_token")) {
-                        Object tokenObj = m.get("access_token");
-                        Object expiryObj = m.get("expiry_date");
-                        Instant expiry = null;
-                        if (expiryObj instanceof Number) {
-                            expiry = Instant.ofEpochMilli(((Number) expiryObj).longValue());
-                        } else if (expiryObj instanceof String) {
-                            try {
-                                expiry = Instant.parse((String) expiryObj);
-                            } catch (Exception ex) {
-                                // ignore
-                            }
-                        } else if (m.containsKey("expires_in")) {
-                            Number seconds = (Number) m.get("expires_in");
-                            expiry = Instant.now().plusSeconds(seconds.longValue());
+				Map<String, Object> m = om.readValue(text, new TypeReference<Map<String, Object>>() {
+				});
+				if (m.containsKey("access_token")) {
+					Object tokenObj = m.get("access_token");
+					Object expiryObj = m.get("expiry_date");
+					Instant expiry = null;
+					if (expiryObj instanceof Number) {
+						expiry = Instant.ofEpochMilli(((Number) expiryObj).longValue());
+					} else if (expiryObj instanceof String) {
+						try {
+							expiry = Instant.parse((String) expiryObj);
+						} catch (Exception ex) {
+							// ignore
                         }
+					} else if (m.containsKey("expires_in")) {
+						Number seconds = (Number) m.get("expires_in");
+						expiry = Instant.now().plusSeconds(seconds.longValue());
+					}
 
-                        if (expiry != null && expiry.isAfter(Instant.now().plus(MIN_TOKEN_LIFETIME))) {
-                            // token valid for at least 30 days
-                            this.cachedToken = new AccessToken((String) tokenObj, Date.from(expiry));
-                            return;
-                        }
-                        // else fallthrough to try proper credential types
+					if (expiry != null && expiry.isAfter(Instant.now().plus(MIN_TOKEN_LIFETIME))) {
+						// token valid for at least 30 days
+						this.cachedToken = new AccessToken((String) tokenObj, Date.from(expiry));
+						return;
                     }
-                } catch (IOException e) {
-                    // if parsing fails, continue to try GoogleCredentials.fromStream
+					// else fallthrough to try proper credential types
                 }
 
                 try (InputStream in = new FileInputStream(path)) {

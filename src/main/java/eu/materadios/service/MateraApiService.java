@@ -13,9 +13,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-
 import eu.materadios.api.Building;
 import eu.materadios.api.BuildingCharac;
 import eu.materadios.api.BuildingConfig;
@@ -39,10 +36,14 @@ import eu.materadios.api.OwnersResponse;
 import eu.materadios.api.PrivateTopicsResponse;
 import eu.materadios.api.Project;
 import eu.materadios.api.ProjectsResponse;
+import eu.materadios.api.Supplier;
+import eu.materadios.api.SuppliersResponse;
 import eu.materadios.api.Tenant;
 import eu.materadios.api.TenantsResponse;
 import eu.materadios.api.Topic;
 import eu.materadios.api.TopicsResponse;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class MateraApiService {
@@ -66,7 +67,7 @@ public class MateraApiService {
 	}
 
 	public Building getBuilding(long buildingId) {
-		return callApi("buildings/" + buildingId, Building.class);
+		return callApi("buildings/" + buildingId + "?view=extended", Building.class);
 	}
 
 	public BuildingCharac getBuildingCharac(long buildingId) {
@@ -82,7 +83,8 @@ public class MateraApiService {
 	}
 
 	public ElectronicLettersResponse getElectronicLetters(String after) {
-		return callApi("electronic_letters?includes[]=recipient&includes[]=status&order[id]=desc" + after(after),
+		return callApi(
+				"electronic_letters?includes[]=recipient&includes[]=status&order[id]=desc" + paging(25, after),
 				ElectronicLettersResponse.class);
 	}
 
@@ -91,7 +93,7 @@ public class MateraApiService {
 	}
 
 	public LettersResponse getLetters(String after) {
-		return callApi("letters?includes[]=recipient&includes[]=status&order[id]=desc" + after(after),
+		return callApi("letters?includes[]=recipient&includes[]=status&order[id]=desc" + paging(25, after),
 				LettersResponse.class);
 	}
 
@@ -108,12 +110,12 @@ public class MateraApiService {
 	public MailboxThreadsResponse getMailboxThreads(String after) {
 		return callApi(
 				"mailbox/threads?includes[assignees][avatar]=true&includes[emails][read_states]=true&includes[emails][recipients][avatar]=true&includes[emails][sender][avatar]=true&includes[project]=true&view=preview"
-						+ after(after),
+						+ paging(25, after),
 				MailboxThreadsResponse.class);
 	}
 
 	public MessagesResponse getMessages(String after) {
-		return callApi("messages" + after(after), MessagesResponse.class);
+		return callApi("messages" + paging(25, after), MessagesResponse.class);
 	}
 
 	public List<Meter> getMeters() {
@@ -137,12 +139,18 @@ public class MateraApiService {
 	public PrivateTopicsResponse getPrivateTopics(String after) {
 		return callApi(
 				"private_topics?includes[author]=true&includes[messages][author]=true&includes[read_states][app_user]=true&includes[recipients]=true&order[MAX(private_messages.created_at)]=desc"
-						+ after(after),
+						+ paging(25, after),
 				PrivateTopicsResponse.class);
 	}
 
 	public List<Project> getProjects() {
 		return callApi("abstract_projects?order[created_at]=desc", ProjectsResponse.class).results();
+	}
+
+	public List<Supplier> getSuppliers() {
+		return callApi(
+				"suppliers?includes[deletable]=true&includes[main_account][balance]=true",
+				SuppliersResponse.class).results();
 	}
 
 	public List<Tenant> getTenants() {
@@ -160,12 +168,12 @@ public class MateraApiService {
 	public TopicsResponse getTopics(String after) {
 		return callApi(
 				"topics?includes[author]=avatar&includes[current_user_unread_messages_count]=&includes[follower_ids]=&includes[messages]=author&includes[posted_as_council]=&includes[read_states_count]=&order[MAX(messages.created_at)]=desc&order[id]=desc"
-						+ after(after),
+						+ paging(25, after),
 				TopicsResponse.class);
 	}
 
-	private static String after(String after) {
-		return after != null ? "&after=" + after : "";
+	private static String paging(int limit, String after) {
+		return "&limit=" + limit + (after != null ? "&after=" + after : "");
 	}
 
 	private <T> T callApi(String api, Class<T> responseClass) {

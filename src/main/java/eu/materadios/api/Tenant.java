@@ -10,8 +10,7 @@ public record Tenant(long id, String address_city, String address_complement, St
 		String address_name, String address_street, String address_zipcode, URL avatar_url, String birth_date,
 		long building_id, TenantConfig config, String email, String first_name, String last_name, String full_address,
 		String full_name, String full_name_inverted, String name, String phone_number, String status, String type,
-		boolean valid_address, boolean valid_address_question, boolean valid_email, boolean valid_email_question,
-		List<Lot> lots, User owner, List<TenantUser> users) {
+		boolean valid_address, boolean valid_email, List<Lot> lots, User owner, List<TenantUser> users) {
 
 	@JsonIgnoreProperties(ignoreUnknown = true)
 	public record TenantConfig(long id, boolean can_message_create, boolean can_private_message_create) {
