@@ -17,6 +17,10 @@ import eu.materadios.api.Building;
 import eu.materadios.api.BuildingCharac;
 import eu.materadios.api.BuildingConfig;
 import eu.materadios.api.Context;
+import eu.materadios.api.Document;
+import eu.materadios.api.DocumentFolder;
+import eu.materadios.api.DocumentFoldersResponse;
+import eu.materadios.api.DocumentsResponse;
 import eu.materadios.api.ElectronicLettersResponse;
 import eu.materadios.api.Exercice;
 import eu.materadios.api.ExercicesResponse;
@@ -51,13 +55,31 @@ public class MateraApiService {
 
     private final MateraAuthService authService;
     private final ObjectMapper mapper = new ObjectMapper();
-    private final HttpClient httpClient = HttpClient.newBuilder().build();
+    private final HttpClient httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build();
 
     @Value("${matera.api.url:https://api-core.matera.eu}")
     private String apiUrl;
 
     public MateraApiService(MateraAuthService authService) {
         this.authService = authService;
+    }
+
+    public Document getDocument(long id) {
+        return callApi("documents/" + id + "?includes%5B%5D=file&view=extended", Document.class);
+    }
+
+    public byte[] downloadFile(String url) throws IOException {
+        try {
+            HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url))
+                    .header("Cookie", authService.getCookieHeader()).GET().build();
+            HttpResponse<byte[]> resp = httpClient.send(req, BodyHandlers.ofByteArray());
+            if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
+                return resp.body();
+            }
+            throw new IOException("Download failed with status " + resp.statusCode() + " for: " + url);
+        } catch (InterruptedException e) {
+            throw new IOException(e);
+        }
     }
 
     public List<MateraBankAccount> getBankAccounts() {
@@ -76,6 +98,21 @@ public class MateraApiService {
 
     public BuildingConfig getBuildingConfig(long buildingId) {
         return callApi("buildings/" + buildingId + "/config?includes[csm]=true", BuildingConfig.class);
+    }
+
+    public List<DocumentFolder> getDocumentFolders(Long parentId) {
+        String parentParam = parentId != null ? String.valueOf(parentId) : "";
+        return callApi(
+                "document_folders?filters%5Bparent_id%5D=" + parentParam + "&includes%5B%5D=documents_count",
+                DocumentFoldersResponse.class).results();
+    }
+
+    public DocumentsResponse getDocuments(Long folderId, String after) {
+        String folderParam = folderId != null ? String.valueOf(folderId) : "";
+        return callApi(
+                "documents?filters%5Bfolder_id%5D=" + folderParam + "&includes%5B%5D=file&view=extended"
+                        + paging(50, after),
+                DocumentsResponse.class);
     }
 
     public Context getContext() {

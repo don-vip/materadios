@@ -1,11 +1,18 @@
 package eu.materadios.controller;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,6 +24,9 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 import eu.materadios.api.Building;
 import eu.materadios.api.BuildingCharac;
 import eu.materadios.api.BuildingConfig;
+import eu.materadios.api.Document;
+import eu.materadios.api.DocumentFolder;
+import eu.materadios.api.DocumentsResponse;
 import eu.materadios.api.ElectronicLettersResponse;
 import eu.materadios.api.LettersResponse;
 import eu.materadios.api.MailboxThreadsResponse;
@@ -42,6 +52,32 @@ public class WebController {
     public String index(Model model) {
         model.addAttribute("items", exportService.listAll());
         return "index";
+    }
+
+    @GetMapping("/files/{id}")
+    public ResponseEntity<byte[]> serveLocalFile(@PathVariable Long id) throws IOException {
+        var item = exportService.findById(id);
+        if (item == null) {
+            return ResponseEntity.notFound().build();
+        }
+        Path filePath = Paths.get(item.getLocalPath());
+        // Restrict to the data/exported directory to prevent path traversal
+        Path exportRoot = Paths.get("data", "exported").toAbsolutePath().normalize();
+        if (!filePath.toAbsolutePath().normalize().startsWith(exportRoot)) {
+            return ResponseEntity.status(403).build();
+        }
+        if (!Files.exists(filePath)) {
+            return ResponseEntity.notFound().build();
+        }
+        byte[] content = Files.readAllBytes(filePath);
+        String mediaType = Files.probeContentType(filePath);
+        if (mediaType == null) {
+            mediaType = "application/octet-stream";
+        }
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + filePath.getFileName() + "\"")
+                .contentType(MediaType.parseMediaType(mediaType))
+                .body(content);
     }
 
     @GetMapping("/matera/context")
@@ -259,6 +295,89 @@ public class WebController {
             ra.addFlashAttribute("error", "Batch export failed: " + ex.getMessage());
         }
         return "redirect:/";
+    }
+
+    @PostMapping("/admin/purge/database")
+    public String purgeDatabase(RedirectAttributes ra) {
+        try {
+            exportService.purgeDatabase();
+            ra.addFlashAttribute("message", "Local database purged.");
+        } catch (Exception ex) {
+            ra.addFlashAttribute("error", "Database purge failed: " + ex.getMessage());
+        }
+        return "redirect:/";
+    }
+
+    @PostMapping("/admin/purge/files")
+    public String purgeFiles(RedirectAttributes ra) {
+        try {
+            exportService.purgeLocalFiles();
+            ra.addFlashAttribute("message", "Local files purged.");
+        } catch (Exception ex) {
+            ra.addFlashAttribute("error", "File purge failed: " + ex.getMessage());
+        }
+        return "redirect:/";
+    }
+
+    @GetMapping("/matera/documents")
+    public String documents(
+            @RequestParam(value = "folderId", required = false) Long folderId,
+            @RequestParam(value = "folderName", required = false) String folderName,
+            @RequestParam(value = "after", required = false) String after,
+            Model model) {
+        try {
+            List<DocumentFolder> subFolders = materaApiService.getDocumentFolders(folderId);
+            DocumentsResponse docsResp = materaApiService.getDocuments(folderId, after);
+            model.addAttribute("subFolders", subFolders);
+            model.addAttribute("documents", docsResp.results());
+            model.addAttribute("meta", docsResp.meta());
+            model.addAttribute("exportedDocumentIds", exportService.exportedDocumentIds());
+            model.addAttribute("folderId", folderId);
+            model.addAttribute("folderName", folderName);
+            model.addAttribute("after", after);
+        } catch (Exception ex) {
+            model.addAttribute("error", ex.getMessage());
+        }
+        return "documents";
+    }
+
+    @PostMapping("/export/document/{id}")
+    public String exportDocument(@PathVariable long id,
+            @RequestParam(value = "folderId", required = false) Long folderId,
+            @RequestParam(value = "folderName", required = false) String folderName,
+            RedirectAttributes ra) {
+        try {
+            exportService.exportDocumentToDisk(id);
+            ra.addFlashAttribute("message", "Document exported.");
+        } catch (Exception ex) {
+            ra.addFlashAttribute("error", "Export failed: " + ex.getMessage());
+        }
+        return buildDocumentsRedirect(folderId, folderName);
+    }
+
+    @PostMapping("/export/document/folder/{folderId}")
+    public String exportDocumentFolder(@PathVariable long folderId,
+            @RequestParam(value = "folderName", required = false) String folderName,
+            RedirectAttributes ra) {
+        try {
+            exportService.exportDocumentFolderToDisk(folderId);
+            ra.addFlashAttribute("message", "Folder exported recursively.");
+        } catch (Exception ex) {
+            ra.addFlashAttribute("error", "Folder export failed: " + ex.getMessage());
+        }
+        return buildDocumentsRedirect(folderId, folderName);
+    }
+
+    private static String buildDocumentsRedirect(Long folderId, String folderName) {
+        if (folderId == null) {
+            return "redirect:/matera/documents";
+        }
+        StringBuilder sb = new StringBuilder("redirect:/matera/documents?folderId=").append(folderId);
+        if (folderName != null && !folderName.isBlank()) {
+            sb.append("&folderName=").append(java.net.URLEncoder.encode(folderName,
+                    java.nio.charset.StandardCharsets.UTF_8));
+        }
+        return sb.toString();
     }
 
     @GetMapping("/matera/suppliers")

@@ -1,6 +1,8 @@
 .classpath
 .settings
 
+.claude/worktrees
+
 # Compiled class file
 *.class
 

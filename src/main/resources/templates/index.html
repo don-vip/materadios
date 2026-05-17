@@ -17,8 +17,17 @@
         <button type="submit" class="btn btn-primary mb-3">Export all from Matera (TODO)</button>
     </form>
     <a class="btn btn-outline-secondary mb-3 ms-2" href="/matera/context">View Matera Context</a>
+    <form method="post" action="/admin/purge/database" style="display:inline"
+          onsubmit="return confirm('Delete all records from the local database?')">
+        <button type="submit" class="btn btn-danger mb-3 ms-2">Purge database</button>
+    </form>
+    <form method="post" action="/admin/purge/files" style="display:inline"
+          onsubmit="return confirm('Delete all locally exported files?')">
+        <button type="submit" class="btn btn-danger mb-3 ms-2">Purge local files</button>
+    </form>
 
     <div class="mb-3">
+      <a class="btn btn-sm btn-outline-primary me-1" href="/matera/documents">Documents</a>
       <a class="btn btn-sm btn-outline-primary me-1" href="/matera/building">Building</a>
       <a class="btn btn-sm btn-outline-primary me-1" href="/matera/exercices">Exercices</a>
       <a class="btn btn-sm btn-outline-primary me-1" href="/matera/letters">Letters</a>
@@ -54,7 +63,7 @@
             <td th:text="${item.type}"></td>
             <td th:text="${item.materaId}"></td>
             <td>
-                <a th:href="${(#strings.replace(item.localPath, '\\\\', '/')).startsWith('/') ? 'file://' + #strings.replace(item.localPath, '\\\\', '/') : 'file:///' + #strings.replace(item.localPath, '\\\\', '/')}" th:text="${item.localPath}" target="_blank"></a>
+                <a th:href="@{/files/{id}(id=${item.id})}" th:text="${item.localPath}" target="_blank"></a>
             </td>
             <td th:text="${item.exported}"></td>
             <td>

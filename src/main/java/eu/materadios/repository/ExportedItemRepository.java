@@ -13,4 +13,6 @@ public interface ExportedItemRepository extends JpaRepository<ExportedItem, Long
     List<ExportedItem> findByCreatedAtBetween(Instant start, Instant end);
 
     List<ExportedItem> findByMateraIdStartingWith(String prefix);
+
+    boolean existsByMateraId(String materaId);
 }

@@ -2,8 +2,10 @@ package eu.materadios.service;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.stream.Collectors.joining;
+import static java.util.stream.Collectors.toSet;
 
 import java.io.IOException;
+import java.net.URLDecoder;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -13,10 +15,15 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import eu.materadios.api.Document;
+import eu.materadios.api.DocumentFolder;
+import eu.materadios.api.DocumentsResponse;
 import eu.materadios.api.MailboxThread;
 import eu.materadios.model.ExportedItem;
 import eu.materadios.model.MailboxExportMetadata;
@@ -25,6 +32,8 @@ import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class ExportService {
+
+    private static final Logger log = LoggerFactory.getLogger(ExportService.class);
 
     private final ExportedItemRepository repository;
     private final MateraApiService materaApiService;
@@ -74,6 +83,10 @@ public class ExportService {
 
     public List<ExportedItem> listAll() {
         return repository.findAll();
+    }
+
+    public ExportedItem findById(Long id) {
+        return repository.findById(id).orElse(null);
     }
 
     public List<ExportedItem> listByRange(Instant start, Instant end) {
@@ -144,6 +157,124 @@ public class ExportService {
 
             repository.save(it);
         }
+    }
+
+    public void exportDocumentToDisk(long documentId) throws IOException {
+        if (repository.existsByMateraId("document:" + documentId)) {
+            log.info("Document {} already exported, skipping", documentId);
+            return;
+        }
+        Document doc = materaApiService.getDocument(documentId);
+        self.saveDocumentExport(doc);
+    }
+
+    public void exportDocumentFolderToDisk(long folderId) throws IOException {
+        exportFolderRecursive(folderId);
+    }
+
+    private void exportFolderRecursive(long folderId) throws IOException {
+        String after = null;
+        do {
+            DocumentsResponse resp = materaApiService.getDocuments(folderId, after);
+            for (Document doc : resp.results()) {
+                if (!repository.existsByMateraId("document:" + doc.id())) {
+                    self.saveDocumentExport(doc);
+                }
+            }
+            after = resp.meta().has_next_page() ? resp.meta().end_cursor() : null;
+        } while (after != null);
+
+        for (DocumentFolder sub : materaApiService.getDocumentFolders(folderId)) {
+            exportFolderRecursive(sub.id());
+        }
+    }
+
+    @Transactional
+    public void saveDocumentExport(Document doc) throws IOException {
+        ObjectMapper mapper = new ObjectMapper();
+
+        String folderSegment = doc.folder_id() != null ? String.valueOf(doc.folder_id()) : "root";
+        Path dir = Paths.get("data", "exported", "documents", folderSegment);
+        Files.createDirectories(dir);
+
+        String filename = sanitizeFilename(doc.name()) + extractExtension(doc.file());
+        Path filePath = dir.resolve(filename).toAbsolutePath();
+
+        byte[] bytes = materaApiService.downloadFile(doc.file().url());
+        Files.write(filePath, bytes);
+
+        ExportedItem item = new ExportedItem();
+        item.setMateraId("document:" + doc.id());
+        item.setType("DOCUMENT");
+        item.setLocalPath(filePath.toString());
+        item.setMetadataJson(mapper.writeValueAsString(doc));
+        repository.save(item);
+
+        log.info("Exported document {} to {}", doc.id(), filePath);
+    }
+
+    public Set<Long> exportedDocumentIds() {
+        return repository.findByMateraIdStartingWith("document:").stream()
+                .map(it -> Long.parseLong(it.getMateraId().substring("document:".length())))
+                .collect(toSet());
+    }
+
+    private static String sanitizeFilename(String name) {
+        // Replace characters forbidden on Windows/Linux filesystems
+        String s = name.replaceAll("[\\\\/:*?\"<>|\\r\\n\\t]", "_");
+        s = s.replaceAll("_+", "_").strip();
+        // Remove leading/trailing dots (hidden files on Linux, invalid on Windows)
+        s = s.replaceAll("^[.]+|[.]+$", "");
+        return s.isEmpty() ? "unnamed" : s;
+    }
+
+    private static String extractExtension(Document.DocumentFile file) {
+        if (file == null || file.url() == null) {
+            return "";
+        }
+        // Strip query string and grab the last path segment
+        String path = file.url().split("\\?")[0];
+        int lastSlash = path.lastIndexOf('/');
+        if (lastSlash >= 0) {
+            String segment = URLDecoder.decode(path.substring(lastSlash + 1), UTF_8);
+            int dot = segment.lastIndexOf('.');
+            if (dot >= 0) {
+                return segment.substring(dot).toLowerCase();
+            }
+        }
+        if (file.content_type() != null) {
+            return switch (file.content_type().split(";")[0].trim().toLowerCase()) {
+                case "application/pdf" -> ".pdf";
+                case "image/jpeg" -> ".jpg";
+                case "image/png" -> ".png";
+                case "image/gif" -> ".gif";
+                default -> "";
+            };
+        }
+        return "";
+    }
+
+    @Transactional
+    public void purgeDatabase() {
+        repository.deleteAll();
+    }
+
+    public void purgeLocalFiles() throws IOException {
+        Path exported = Paths.get("data", "exported");
+        if (Files.exists(exported)) {
+            deleteRecursively(exported);
+        }
+    }
+
+    private void deleteRecursively(Path path) throws IOException {
+        if (Files.isDirectory(path)) {
+            try (var entries = Files.list(path)) {
+                for (Path entry : entries.toList()) {
+                    deleteRecursively(entry);
+                }
+            }
+        }
+        Files.delete(path);
     }
 
     /**
