@@ -40,8 +40,7 @@ public class WebController {
 
     @GetMapping("/")
     public String index(Model model) {
-        List<ExportedItem> items = exportService.listAll();
-        model.addAttribute("items", items);
+        model.addAttribute("items", exportService.listAll());
         return "index";
     }
 
@@ -245,15 +244,17 @@ public class WebController {
     }
 
     @PostMapping("/export/batch")
-    public String exportBatch(@RequestParam("start") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime start,
-                              @RequestParam("end") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime end,
-                              RedirectAttributes ra) {
+    public String exportBatch(
+            @RequestParam("start") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime start,
+            @RequestParam("end") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime end,
+            RedirectAttributes ra) {
         try {
             Instant s = start.toInstant(ZoneOffset.UTC);
             Instant e = end.toInstant(ZoneOffset.UTC);
             List<ExportedItem> items = exportService.listByRange(s, e);
             // TODO: kick background batch export for selected items
-            ra.addFlashAttribute("message", "Scheduled batch export for " + items.size() + " items. TODO: implement batch processing.");
+            ra.addFlashAttribute("message",
+                    "Scheduled batch export for " + items.size() + " items. TODO: implement batch processing.");
         } catch (Exception ex) {
             ra.addFlashAttribute("error", "Batch export failed: " + ex.getMessage());
         }

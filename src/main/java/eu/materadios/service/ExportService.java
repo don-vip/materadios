@@ -27,13 +27,13 @@ import tools.jackson.databind.ObjectMapper;
 public class ExportService {
 
     private final ExportedItemRepository repository;
-	private final MateraApiService materaApiService;
+    private final MateraApiService materaApiService;
     private final GoogleService googleService;
-	@Autowired
-	private ExportService self;
+    @Autowired
+    private ExportService self;
 
     public ExportService(ExportedItemRepository repository, MateraApiService materaApiService,
-			GoogleService googleService) {
+            GoogleService googleService) {
         this.repository = repository;
         this.materaApiService = materaApiService;
         this.googleService = googleService;
@@ -44,17 +44,19 @@ public class ExportService {
      */
     @Transactional
     public void exportAllFromMatera() {
-		// TODO: implement Matera API integration
+        // TODO: implement Matera API integration
         throw new UnsupportedOperationException("exportAllFromMatera is not implemented yet");
     }
 
     @Transactional
     public ExportedItem exportItemToGoogle(Long id) {
         Optional<ExportedItem> item = repository.findById(id);
-        if (item.isEmpty()) throw new IllegalArgumentException("Item not found");
+        if (item.isEmpty())
+            throw new IllegalArgumentException("Item not found");
 
         ExportedItem e = item.get();
-        if (Boolean.TRUE.equals(e.getExported())) return e; // already exported
+        if (Boolean.TRUE.equals(e.getExported()))
+            return e; // already exported
 
         // Upload depending on type
         String url;
@@ -79,80 +81,80 @@ public class ExportService {
     }
 
     /**
-	 * Export a mailbox thread and its emails to local disk. Creates one
-	 * ExportedItem per email.
-	 *
-	 * @throws IOException
-	 */
+     * Export a mailbox thread and its emails to local disk. Creates one
+     * ExportedItem per email.
+     *
+     * @throws IOException
+     */
     public void exportMailboxThreadToDisk(long threadId) throws IOException {
         MailboxThread thread = materaApiService.getMailboxThread(threadId);
         if (thread == null) {
             throw new IllegalArgumentException("Thread not found: " + threadId);
         }
-		self.exportMailboxThread(thread);
-	}
+        self.exportMailboxThread(thread);
+    }
 
-	/**
-	 * Performs DB writes for a mailbox thread export. This method is transactional.
-	 */
-	@Transactional
-	public void exportMailboxThread(MailboxThread thread) throws IOException {
-		long threadId = thread.id();
+    /**
+     * Performs DB writes for a mailbox thread export. This method is transactional.
+     */
+    @Transactional
+    public void exportMailboxThread(MailboxThread thread) throws IOException {
+        long threadId = thread.id();
 
-		Path base = Paths.get("data", "exported", "mailbox_threads", String.valueOf(threadId));
-		Files.createDirectories(base);
+        Path base = Paths.get("data", "exported", "mailbox_threads", String.valueOf(threadId));
+        Files.createDirectories(base);
 
-		ObjectMapper mapper = new ObjectMapper();
+        ObjectMapper mapper = new ObjectMapper();
 
-		List<MailboxThread.Email> emails = thread.emails();
-		if (emails == null)
-			return;
+        List<MailboxThread.Email> emails = thread.emails();
+        if (emails == null)
+            return;
 
-		for (MailboxThread.Email email : emails) {
-			String fileName = "email-" + email.id() + ".eml";
-			Path file = base.resolve(fileName);
-			String body = email.content_text() != null ? email.content_text() : email.content_html();
-			if (body == null) {
-				body = "";
-			}
+        for (MailboxThread.Email email : emails) {
+            String fileName = "email-" + email.id() + ".eml";
+            Path file = base.resolve(fileName).toAbsolutePath();
+            String body = email.content_text() != null ? email.content_text() : email.content_html();
+            if (body == null) {
+                body = "";
+            }
 
-			StringBuilder sb = new StringBuilder();
-			sb.append("From: ").append(
-					email.from() != null ? email.from() : (email.sender() != null ? email.sender().full_name() : ""))
-					.append('\n');
-			sb.append("To: ");
-			if (email.recipients() != null) {
-				sb.append(email.recipients().stream().map(r -> r.email() != null ? r.email() : r.full_name())
-						.collect(joining(",")));
-			}
-			sb.append('\n');
-			sb.append("Subject: ").append(email.subject() != null ? email.subject() : "").append('\n');
-			sb.append("Date: ").append(email.date() != null ? email.date().toString() : "").append('\n');
-			sb.append("MIME-Version: 1.0\n");
-			sb.append("Content-Type: text/plain; charset=utf-8\n\n");
-			sb.append(body).append('\n');
+            StringBuilder sb = new StringBuilder();
+            sb.append("From: ").append(
+                    email.from() != null ? email.from() : (email.sender() != null ? email.sender().full_name() : ""))
+                    .append('\n');
+            sb.append("To: ");
+            if (email.recipients() != null) {
+                sb.append(email.recipients().stream().map(r -> r.email() != null ? r.email() : r.full_name())
+                        .collect(joining(",")));
+            }
+            sb.append('\n');
+            sb.append("Subject: ").append(email.subject() != null ? email.subject() : "").append('\n');
+            sb.append("Date: ").append(email.date() != null ? email.date().toString() : "").append('\n');
+            sb.append("MIME-Version: 1.0\n");
+            sb.append("Content-Type: text/plain; charset=utf-8\n\n");
+            sb.append(body).append('\n');
 
-			Files.write(file, sb.toString().getBytes(UTF_8));
+            Files.write(file, sb.toString().getBytes(UTF_8));
 
-			ExportedItem it = new ExportedItem();
-			it.setMateraId("mailbox_thread:" + threadId + ":email:" + email.id());
-			it.setType("EMAIL");
-			it.setLocalPath(file.toString());
-			it.setMetadataJson(mapper.writeValueAsString(new MailboxExportMetadata(thread, email)));
+            ExportedItem it = new ExportedItem();
+            it.setMateraId("mailbox_thread:" + threadId + ":email:" + email.id());
+            it.setType("EMAIL");
+            it.setLocalPath(file.toString());
+            it.setMetadataJson(mapper.writeValueAsString(new MailboxExportMetadata(thread, email)));
 
-			repository.save(it);
-		}
+            repository.save(it);
+        }
     }
 
     /**
      * Return set of exported mailbox thread ids (extracted from materaId pattern).
      */
-	public Set<Long> exportedMailboxThreadIds() {
-		List<ExportedItem> items = repository.findByMateraIdStartingWith("mailbox_thread:");
-		Set<Long> s = new TreeSet<>();
+    public Set<Long> exportedMailboxThreadIds() {
+        List<ExportedItem> items = repository.findByMateraIdStartingWith("mailbox_thread:");
+        Set<Long> s = new TreeSet<>();
         for (ExportedItem it : items) {
             // pattern: mailbox_thread:{threadId}:email:{emailId}
-			s.add(Long.parseLong(it.getMateraId().split(":")[1]));
+            s.add(Long.parseLong(it.getMateraId().split(":")[1]));
         }
         return s;
     }

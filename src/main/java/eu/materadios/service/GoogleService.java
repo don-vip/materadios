@@ -29,8 +29,8 @@ public class GoogleService {
 
     /**
      * Upload a local file to Google Drive using a single multipart upload request.
-     * Returns a drive URL when successful.
-     * This method tries to minimize requests by relying on the local database to avoid re-uploads.
+     * Returns a drive URL when successful. This method tries to minimize requests
+     * by relying on the local database to avoid re-uploads.
      */
     public String uploadFileToDrive(String localPath) {
         try (CloseableHttpClient client = HttpClients.createDefault()) {
@@ -39,12 +39,10 @@ public class GoogleService {
             byte[] fileBytes = Files.readAllBytes(p);
 
             String boundary = "===============MATERA_BOUNDARY_" + System.currentTimeMillis();
-            String metadataPart = "--" + boundary + "\r\n" +
-                    "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
-                    "{\"name\":\"" + filename + "\"}\r\n";
+            String metadataPart = "--" + boundary + "\r\n" + "Content-Type: application/json; charset=UTF-8\r\n\r\n"
+                    + "{\"name\":\"" + filename + "\"}\r\n";
 
-            String fileHeader = "--" + boundary + "\r\n" +
-                    "Content-Type: application/octet-stream\r\n\r\n";
+            String fileHeader = "--" + boundary + "\r\n" + "Content-Type: application/octet-stream\r\n\r\n";
 
             String end = "\r\n--" + boundary + "--\r\n";
 
@@ -72,7 +70,9 @@ public class GoogleService {
                     String id = Integer.toHexString(filename.hashCode());
                     return "https://drive.google.com/file/d/" + id + "/view";
                 } else {
-                    String err = response.getEntity() != null ? new String(response.getEntity().getContent().readAllBytes()) : "";
+                    String err = response.getEntity() != null
+                            ? new String(response.getEntity().getContent().readAllBytes())
+                            : "";
                     throw new RuntimeException("Drive upload failed: " + status + " " + err);
                 }
             }
@@ -107,7 +107,9 @@ public class GoogleService {
                     String fakeId = Integer.toHexString(raw.length + localPath.hashCode());
                     return "https://mail.google.com/mail/u/0/#all/" + fakeId;
                 } else {
-                    String err = response.getEntity() != null ? new String(response.getEntity().getContent().readAllBytes()) : "";
+                    String err = response.getEntity() != null
+                            ? new String(response.getEntity().getContent().readAllBytes())
+                            : "";
                     throw new RuntimeException("Gmail send failed: " + status + " " + err);
                 }
             }
