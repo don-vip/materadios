@@ -28,6 +28,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 import eu.materadios.api.Building;
@@ -46,6 +47,7 @@ import eu.materadios.api.TopicsResponse;
 import eu.materadios.model.ExportedItem;
 import eu.materadios.model.ProjectLabel;
 import eu.materadios.repository.ProjectLabelRepository;
+import eu.materadios.service.BulkEmailExportService;
 import eu.materadios.service.ExportService;
 import eu.materadios.service.GoogleService;
 import eu.materadios.service.MateraApiService;
@@ -61,13 +63,16 @@ public class WebController {
     private final MateraApiService materaApiService;
     private final GoogleService googleService;
     private final ProjectLabelRepository projectLabelRepository;
+    private final BulkEmailExportService bulkEmailExportService;
 
     public WebController(ExportService exportService, MateraApiService materaApiService,
-            GoogleService googleService, ProjectLabelRepository projectLabelRepository) {
+            GoogleService googleService, ProjectLabelRepository projectLabelRepository,
+            BulkEmailExportService bulkEmailExportService) {
         this.exportService = exportService;
         this.materaApiService = materaApiService;
         this.googleService = googleService;
         this.projectLabelRepository = projectLabelRepository;
+        this.bulkEmailExportService = bulkEmailExportService;
     }
 
     @GetMapping("/")
@@ -120,6 +125,7 @@ public class WebController {
         model.addAttribute("emailTotal", emailTotal);
         model.addAttribute("docTotal", docTotal);
         model.addAttribute("attTotal", attTotal);
+        model.addAttribute("bulkStatus", bulkEmailExportService.getStatus());
         return "index";
     }
 
@@ -406,17 +412,26 @@ public class WebController {
         return "topics";
     }
 
-    @PostMapping("/export/all")
-    public String exportAll(RedirectAttributes ra) {
-        try {
-            exportService.exportAllFromMatera();
-            ra.addFlashAttribute("message", "Started export job (see logs). TODO: implement progress reporting.");
-        } catch (Exception ex) {
-            log.error("exportAll failed", ex);
-            ra.addFlashAttribute("error", "Export failed to start: " + ex.getMessage());
-            ra.addFlashAttribute("errorDetail", stackTrace(ex));
+    @PostMapping("/export/all/emails")
+    public String exportAllEmails(RedirectAttributes ra) {
+        boolean started = bulkEmailExportService.start();
+        if (!started) {
+            ra.addFlashAttribute("error", "An export job is already running.");
         }
         return "redirect:/";
+    }
+
+    @PostMapping("/export/all/emails/cancel")
+    public String cancelExportAllEmails(RedirectAttributes ra) {
+        bulkEmailExportService.cancel();
+        ra.addFlashAttribute("message", "Cancellation requested — the job will stop after the current thread.");
+        return "redirect:/";
+    }
+
+    @GetMapping(value = "/export/all/emails/status", produces = "application/json")
+    @ResponseBody
+    public BulkEmailExportService.Status exportAllEmailsStatus() {
+        return bulkEmailExportService.getStatus();
     }
 
     @PostMapping("/export/item/{id}")

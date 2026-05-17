@@ -101,9 +101,12 @@ public class ExportService {
             List<String> labelIds = new ArrayList<>();
             MailboxThread.Email email = meta.email();
             boolean isDraft = email != null && Boolean.TRUE.equals(email.draft());
+            boolean isTrashed = isTrashed(meta.thread());
 
             if (isDraft) {
                 labelIds.add("DRAFT");
+            } else if (isTrashed) {
+                labelIds.add("TRASH");
             } else {
                 String kind = email != null ? email.kind() : null;
                 if (kind != null && kind.contains("outbound")) {
@@ -245,6 +248,12 @@ public class ExportService {
             it.setExportedAt(null);
             repository.save(it);
         }
+    }
+
+    private static boolean isTrashed(MailboxThread thread) {
+        if (thread == null) return false;
+        String state = thread.state();
+        return state != null && (state.contains("trash") || state.contains("delet"));
     }
 
     private static byte[] buildEml(MailboxThread.Email email, List<MailboxThread.Attachment> atts,
@@ -457,6 +466,11 @@ public class ExportService {
             }
         }
         Files.delete(path);
+    }
+
+    public boolean isThreadOnDisk(long threadId) {
+        return repository.findByMateraIdStartingWith("mailbox_thread:" + threadId + ":email:").stream()
+                .anyMatch(e -> "EMAIL".equals(e.getType()));
     }
 
     public Set<Long> exportedMailboxThreadIds() {

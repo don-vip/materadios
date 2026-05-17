@@ -32,8 +32,10 @@
     </div>
 
     <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
-        <form method="post" action="/export/all" style="display:inline">
-            <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-cloud-download me-1"></i>Export all from Matera (TODO)</button>
+        <form method="post" action="/export/all/emails" style="display:inline"
+              th:if="${!bulkStatus.running()}"
+              onsubmit="return confirm('This will export ALL email threads from Matera to disk and then to Gmail. It may take several hours. Continue?')">
+            <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-cloud-download me-1"></i>Export all emails</button>
         </form>
         <form method="post" action="/admin/purge/database" style="display:inline"
               onsubmit="return confirm('Delete all records from the local database?')">
@@ -43,6 +45,38 @@
               onsubmit="return confirm('Delete all locally exported files?')">
             <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash me-1"></i>Purge files</button>
         </form>
+    </div>
+
+    <!-- Bulk export status banner -->
+    <div id="bulk-status-banner"
+         th:data-running="${bulkStatus.running()}"
+         th:data-phase="${bulkStatus.phase()}"
+         th:unless="${bulkStatus.phase() == 'idle'}"
+         class="alert alert-dismissible py-2 mb-3"
+         th:classappend="${bulkStatus.running()} ? ' alert-info' : (${bulkStatus.phase() == 'done'} ? ' alert-success' : (${bulkStatus.phase() == 'failed'} ? ' alert-danger' : ' alert-warning'))">
+        <div class="d-flex align-items-center gap-3 flex-wrap">
+            <span th:if="${bulkStatus.running()}" class="spinner-border spinner-border-sm" role="status"></span>
+            <span id="bulk-status-text">
+                <strong th:switch="${bulkStatus.phase()}">
+                    <span th:case="'running'">Export in progress…</span>
+                    <span th:case="'done'">Export complete.</span>
+                    <span th:case="'cancelled'">Export cancelled.</span>
+                    <span th:case="'failed'">Export failed.</span>
+                </strong>
+                &nbsp;Threads:&nbsp;<span id="bulk-threads" th:text="${bulkStatus.threadsProcessed()}"></span>
+                &nbsp;|&nbsp;Emails:&nbsp;<span id="bulk-emails" th:text="${bulkStatus.emailsProcessed()}"></span>
+                <span th:if="${bulkStatus.errorsCount() > 0}">
+                    &nbsp;|&nbsp;<span class="text-danger">Errors:&nbsp;<span id="bulk-errors" th:text="${bulkStatus.errorsCount()}"></span></span>
+                </span>
+                <span th:if="${bulkStatus.lastError()}" class="text-danger small ms-2" id="bulk-last-error"
+                      th:text="${bulkStatus.lastError()}"></span>
+            </span>
+            <form th:if="${bulkStatus.running()}" method="post" action="/export/all/emails/cancel" style="display:inline">
+                <button type="submit" class="btn btn-sm btn-outline-danger">
+                    <i class="bi bi-stop-circle me-1"></i>Cancel
+                </button>
+            </form>
+        </div>
     </div>
 
     <div th:if="${message}" class="alert alert-success alert-dismissible py-2" role="alert">
@@ -238,5 +272,101 @@
 
 </div>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+(function () {
+    const banner = document.getElementById('bulk-status-banner');
+    let pollInterval = null;
+
+    function phaseClass(phase) {
+        if (phase === 'running') return 'alert-info';
+        if (phase === 'done')    return 'alert-success';
+        if (phase === 'failed')  return 'alert-danger';
+        return 'alert-warning'; // cancelled
+    }
+
+    function phaseLabel(phase) {
+        if (phase === 'running')   return 'Export in progress…';
+        if (phase === 'done')      return 'Export complete.';
+        if (phase === 'cancelled') return 'Export cancelled.';
+        if (phase === 'failed')    return 'Export failed.';
+        return '';
+    }
+
+    function updateBanner(s) {
+        if (s.phase === 'idle') {
+            if (banner) banner.style.display = 'none';
+            return;
+        }
+
+        if (!banner) {
+            // Page was rendered without a banner (idle at load time) — reload to show it
+            location.reload();
+            return;
+        }
+
+        banner.style.display = '';
+        banner.classList.remove('alert-info', 'alert-success', 'alert-danger', 'alert-warning');
+        banner.classList.add(phaseClass(s.phase));
+
+        const spinner = banner.querySelector('.spinner-border');
+        if (s.running) {
+            if (!spinner) {
+                const sp = document.createElement('span');
+                sp.className = 'spinner-border spinner-border-sm';
+                sp.role = 'status';
+                banner.querySelector('.d-flex').prepend(sp);
+            }
+        } else {
+            if (spinner) spinner.remove();
+        }
+
+        const threads = document.getElementById('bulk-threads');
+        const emails  = document.getElementById('bulk-emails');
+        const errors  = document.getElementById('bulk-errors');
+        const lastErr = document.getElementById('bulk-last-error');
+        const label   = banner.querySelector('strong');
+
+        if (label)   label.textContent = phaseLabel(s.phase);
+        if (threads) threads.textContent = s.threadsProcessed;
+        if (emails)  emails.textContent  = s.emailsProcessed;
+        if (errors)  errors.textContent  = s.errorsCount;
+        if (lastErr) lastErr.textContent  = s.lastError || '';
+
+        // Show/hide cancel button
+        let cancelForm = banner.querySelector('form[action="/export/all/emails/cancel"]');
+        if (s.running && !cancelForm) {
+            cancelForm = document.createElement('form');
+            cancelForm.method = 'post';
+            cancelForm.action = '/export/all/emails/cancel';
+            cancelForm.style.display = 'inline';
+            cancelForm.innerHTML = '<button type="submit" class="btn btn-sm btn-outline-danger">'
+                + '<i class="bi bi-stop-circle me-1"></i>Cancel</button>';
+            banner.querySelector('.d-flex').appendChild(cancelForm);
+        } else if (!s.running && cancelForm) {
+            cancelForm.remove();
+        }
+    }
+
+    function startPolling() {
+        if (pollInterval) return;
+        pollInterval = setInterval(async () => {
+            try {
+                const resp = await fetch('/export/all/emails/status');
+                const s = await resp.json();
+                updateBanner(s);
+                if (!s.running) {
+                    clearInterval(pollInterval);
+                    pollInterval = null;
+                }
+            } catch (_) { /* ignore transient fetch errors */ }
+        }, 1000);
+    }
+
+    // Start polling immediately if job is running at page load
+    if (banner && banner.dataset.running === 'true') {
+        startPolling();
+    }
+})();
+</script>
 </body>
 </html>
