@@ -167,7 +167,7 @@
                     <span th:unless="${tg.allExported}" class="badge bg-warning text-dark"><i class="bi bi-clock me-1"></i>Pending</span>
                 </td>
                 <td class="text-nowrap">
-                    <!-- Export to Google (pending) -->
+                    <!-- Export to Gmail (pending) -->
                     <form th:unless="${tg.allExported}"
                           th:action="@{/export/google/thread/{id}(id=${tg.threadId})}" method="post"
                           style="display:inline">
@@ -177,12 +177,12 @@
                             <i class="bi bi-google me-1"></i>Export to Gmail
                         </button>
                     </form>
-                    <!-- Reset (already exported) -->
-                    <form th:if="${tg.allExported}"
-                          th:action="@{/admin/reset/thread/{id}(id=${tg.threadId})}" method="post"
+                    <!-- Reset: re-downloads from Matera and regenerates EML, then allows re-import -->
+                    <form th:action="@{/admin/reset/thread/{id}(id=${tg.threadId})}" method="post"
                           style="display:inline"
-                          onsubmit="return confirm('Reset Gmail export flag? Re-export to disk from the Mails page first, then re-import.')">
-                        <button class="btn btn-sm btn-outline-warning" type="submit" title="Reset export flag to allow re-import">
+                          onsubmit="return confirm('Re-download this thread from Matera and regenerate EML files, then import to Gmail again?')">
+                        <button class="btn btn-sm btn-outline-warning" type="submit"
+                                th:title="${tg.allExported} ? 'Re-download and re-import to Gmail' : 'Re-download EML files from Matera'">
                             <i class="bi bi-arrow-counterclockwise me-1"></i>Reset
                         </button>
                     </form>

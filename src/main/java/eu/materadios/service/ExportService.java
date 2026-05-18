@@ -138,16 +138,13 @@ public class ExportService {
         }
     }
 
-    @Transactional
-    public void resetThreadExportedFlag(long threadId) {
-        repository.findByMateraIdStartingWith("mailbox_thread:" + threadId + ":email:").stream()
-                .filter(e -> "EMAIL".equals(e.getType()))
-                .forEach(e -> {
-                    e.setExported(false);
-                    e.setGoogleUrl(null);
-                    e.setExportedAt(null);
-                    repository.save(e);
-                });
+    public void resetAndReexportThread(long threadId) throws IOException {
+        MailboxThread thread = materaApiService.getMailboxThread(threadId);
+        if (thread == null) {
+            throw new IllegalArgumentException("Thread not found: " + threadId);
+        }
+        // exportMailboxThread resets exported=false and regenerates EML files on disk
+        self.exportMailboxThread(thread);
     }
 
     public void exportThreadToGoogle(long threadId) {
@@ -271,6 +268,8 @@ public class ExportService {
             sb.append("From: ").append(fromAddr).append("\r\n");
         } else if (fromName != null) {
             sb.append("From: ").append(rfc2047Encode(fromName)).append("\r\n");
+        } else {
+            sb.append("From: unknown@matera.eu\r\n");
         }
         if (email.recipients() != null && !email.recipients().isEmpty()) {
             sb.append("To: ").append(email.recipients().stream()
@@ -336,12 +335,21 @@ public class ExportService {
         sb.append("\r\n");
     }
 
+    // RFC 5322 specials that require quoting when used in a display name
+    private static final String RFC5322_SPECIALS = "<>@,;:\\\"()";
+
     private static String rfc2047Encode(String value) {
         if (value == null)
             return "";
         for (char c : value.toCharArray()) {
             if (c > 127) {
                 return "=?UTF-8?B?" + Base64.getEncoder().encodeToString(value.getBytes(UTF_8)) + "?=";
+            }
+        }
+        // Pure ASCII but contains RFC 5322 specials → quoted-string
+        for (char c : value.toCharArray()) {
+            if (RFC5322_SPECIALS.indexOf(c) >= 0) {
+                return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
             }
         }
         return value;

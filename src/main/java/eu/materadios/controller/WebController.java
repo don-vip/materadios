@@ -450,8 +450,8 @@ public class WebController {
     @PostMapping("/admin/reset/thread/{threadId}")
     public String resetThreadExported(@PathVariable long threadId, RedirectAttributes ra) {
         try {
-            exportService.resetThreadExportedFlag(threadId);
-            ra.addFlashAttribute("message", "Thread " + threadId + " reset — re-export to disk then import to Gmail.");
+            exportService.resetAndReexportThread(threadId);
+            ra.addFlashAttribute("message", "Thread " + threadId + " reset and re-exported to disk — ready to import to Gmail.");
         } catch (Exception ex) {
             log.error("resetThreadExported {} failed", threadId, ex);
             ra.addFlashAttribute("error", "Reset failed: " + ex.getMessage());
