@@ -32,20 +32,63 @@
     </div>
 
     <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
+        <!-- Auto-export toggle -->
+        <div class="d-flex align-items-center gap-2 me-2 border rounded px-3 py-1"
+             id="auto-export-panel"
+             th:data-enabled="${autoStatus.enabled()}"
+             th:data-events="${#lists.size(autoStatus.recentEvents())}">
+            <span class="fw-semibold small">Auto-export</span>
+            <span th:if="${autoStatus.enabled()}" class="badge bg-success d-flex align-items-center gap-1">
+                <span class="spinner-grow spinner-grow-sm" style="width:.5rem;height:.5rem" role="status"></span>
+                ON
+            </span>
+            <span th:unless="${autoStatus.enabled()}" class="badge bg-secondary">OFF</span>
+            <span th:if="${autoStatus.enabled() and autoStatus.phase() != 'idle'}" class="small text-muted"
+                  th:text="${autoStatus.phase() == 'checking'} ? 'Checking…' : 'Exporting…'"></span>
+            <span th:if="${autoStatus.enabled() and autoStatus.lastCheck() != null}" class="small text-muted"
+                  id="auto-last-check">checked <span th:text="${#temporals.format(autoStatus.lastCheck(), 'HH:mm:ss')}"></span></span>
+            <form th:unless="${autoStatus.enabled()}" method="post" action="/auto-export/enable" style="display:inline">
+                <input type="hidden" name="tab" th:value="${tab}" />
+                <input type="hidden" name="filter" th:value="${filter}" />
+                <button type="submit" class="btn btn-sm btn-success py-0">Enable</button>
+            </form>
+            <form th:if="${autoStatus.enabled()}" method="post" action="/auto-export/disable" style="display:inline">
+                <input type="hidden" name="tab" th:value="${tab}" />
+                <input type="hidden" name="filter" th:value="${filter}" />
+                <button type="submit" class="btn btn-sm btn-outline-secondary py-0">Disable</button>
+            </form>
+        </div>
+
         <form method="post" action="/export/all/emails" style="display:inline"
               th:if="${!bulkStatus.running()}"
               onsubmit="return confirm('This will export ALL email threads from Matera to disk and then to Gmail. It may take several hours. Continue?')">
+            <input type="hidden" name="tab" th:value="${tab}" />
+            <input type="hidden" name="filter" th:value="${filter}" />
             <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-cloud-download me-1"></i>Export all emails</button>
+        </form>
+        <form method="post" action="/export/all/documents" style="display:inline"
+              th:if="${!bulkDocStatus.running()}"
+              onsubmit="return confirm('This will export ALL documents from Matera to disk and then to Google Drive. It may take a while. Continue?')">
+            <input type="hidden" name="tab" th:value="${tab}" />
+            <input type="hidden" name="filter" th:value="${filter}" />
+            <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-folder-symlink me-1"></i>Export all documents</button>
         </form>
         <form method="post" action="/admin/purge/database" style="display:inline"
               onsubmit="return confirm('Delete all records from the local database?')">
+            <input type="hidden" name="tab" th:value="${tab}" />
+            <input type="hidden" name="filter" th:value="${filter}" />
             <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash me-1"></i>Purge DB</button>
         </form>
         <form method="post" action="/admin/purge/files" style="display:inline"
               onsubmit="return confirm('Delete all locally exported files?')">
+            <input type="hidden" name="tab" th:value="${tab}" />
+            <input type="hidden" name="filter" th:value="${filter}" />
             <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash me-1"></i>Purge files</button>
         </form>
     </div>
+
+    <!-- Toast container for auto-export notifications -->
+    <div class="toast-container position-fixed top-0 end-0 p-3" id="toast-container" style="z-index:1100"></div>
 
     <!-- Bulk export status banner -->
     <div id="bulk-status-banner"
@@ -72,6 +115,42 @@
                       th:text="${bulkStatus.lastError()}"></span>
             </span>
             <form th:if="${bulkStatus.running()}" method="post" action="/export/all/emails/cancel" style="display:inline">
+                <input type="hidden" name="tab" th:value="${tab}" />
+                <input type="hidden" name="filter" th:value="${filter}" />
+                <button type="submit" class="btn btn-sm btn-outline-danger">
+                    <i class="bi bi-stop-circle me-1"></i>Cancel
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Bulk document export status banner -->
+    <div id="bulk-doc-status-banner"
+         th:data-running="${bulkDocStatus.running()}"
+         th:data-phase="${bulkDocStatus.phase()}"
+         th:unless="${bulkDocStatus.phase() == 'idle'}"
+         class="alert alert-dismissible py-2 mb-3"
+         th:classappend="${bulkDocStatus.running()} ? ' alert-info' : (${bulkDocStatus.phase() == 'done'} ? ' alert-success' : (${bulkDocStatus.phase() == 'failed'} ? ' alert-danger' : ' alert-warning'))">
+        <div class="d-flex align-items-center gap-3 flex-wrap">
+            <span th:if="${bulkDocStatus.running()}" class="spinner-border spinner-border-sm" role="status"></span>
+            <span id="bulk-doc-status-text">
+                <strong th:switch="${bulkDocStatus.phase()}">
+                    <span th:case="'running'"><i class="bi bi-folder me-1"></i>Document export in progress…</span>
+                    <span th:case="'done'">Document export complete.</span>
+                    <span th:case="'cancelled'">Document export cancelled.</span>
+                    <span th:case="'failed'">Document export failed.</span>
+                </strong>
+                &nbsp;Folders:&nbsp;<span id="bulk-doc-folders" th:text="${bulkDocStatus.foldersProcessed()}"></span>
+                &nbsp;|&nbsp;Documents:&nbsp;<span id="bulk-doc-docs" th:text="${bulkDocStatus.documentsProcessed()}"></span>
+                <span th:if="${bulkDocStatus.errorsCount() > 0}">
+                    &nbsp;|&nbsp;<span class="text-danger">Errors:&nbsp;<span id="bulk-doc-errors" th:text="${bulkDocStatus.errorsCount()}"></span></span>
+                </span>
+                <span th:if="${bulkDocStatus.lastError()}" class="text-danger small ms-2" id="bulk-doc-last-error"
+                      th:text="${bulkDocStatus.lastError()}"></span>
+            </span>
+            <form th:if="${bulkDocStatus.running()}" method="post" action="/export/all/documents/cancel" style="display:inline">
+                <input type="hidden" name="tab" th:value="${tab}" />
+                <input type="hidden" name="filter" th:value="${filter}" />
                 <button type="submit" class="btn btn-sm btn-outline-danger">
                     <i class="bi bi-stop-circle me-1"></i>Cancel
                 </button>
@@ -181,6 +260,7 @@
                     <form th:action="@{/admin/reset/thread/{id}(id=${tg.threadId})}" method="post"
                           style="display:inline"
                           onsubmit="return confirm('Re-download this thread from Matera and regenerate EML files, then import to Gmail again?')">
+                        <input type="hidden" name="filter" th:value="${filter}" />
                         <button class="btn btn-sm btn-outline-warning" type="submit"
                                 th:title="${tg.allExported} ? 'Re-download and re-import to Gmail' : 'Re-download EML files from Matera'">
                             <i class="bi bi-arrow-counterclockwise me-1"></i>Reset
@@ -219,8 +299,9 @@
                 <td th:text="${item.id}" class="small text-muted"></td>
                 <td class="small font-monospace text-truncate" style="max-width:160px" th:text="${item.materaId}"></td>
                 <td class="small text-truncate" style="max-width:260px">
-                    <a th:href="@{/files/{id}(id=${item.id})}" th:text="${item.localPath}" target="_blank"
-                       class="text-decoration-none"></a>
+                    <a th:href="@{/files/{id}(id=${item.id})}"
+                       th:text="${#strings.startsWith(item.localPath, exportedRoot) ? #strings.substringAfter(item.localPath, exportedRoot) : item.localPath}"
+                       target="_blank" class="text-decoration-none font-monospace"></a>
                 </td>
                 <td>
                     <span th:if="${item.exported}" class="badge bg-success"><i class="bi bi-google me-1"></i>On Drive</span>
@@ -230,11 +311,21 @@
                     <a th:if="${item.googleUrl}" th:href="${item.googleUrl}" target="_blank"
                        class="btn btn-sm btn-link p-0"><i class="bi bi-box-arrow-up-right"></i></a>
                 </td>
-                <td>
+                <td class="text-nowrap">
                     <form th:unless="${item.exported}"
                           th:action="@{/export/item/{id}(id=${item.id})}" method="post" style="display:inline">
+                        <input type="hidden" name="tab" th:value="${tab}" />
+                        <input type="hidden" name="filter" th:value="${filter}" />
                         <button class="btn btn-sm btn-outline-success" type="submit">
                             <i class="bi bi-google me-1"></i>Export to Drive
+                        </button>
+                    </form>
+                    <form th:action="@{/admin/reset/document/{id}(id=${item.id})}" method="post"
+                          style="display:inline"
+                          onsubmit="return confirm('Reset Drive export flag to allow re-upload?')">
+                        <input type="hidden" name="filter" th:value="${filter}" />
+                        <button class="btn btn-sm btn-outline-warning" type="submit" title="Reset export flag">
+                            <i class="bi bi-arrow-counterclockwise me-1"></i>Reset
                         </button>
                     </form>
                 </td>
@@ -260,7 +351,8 @@
             <tbody>
             <tr th:each="item : ${attachments}">
                 <td class="small font-monospace text-truncate" style="max-width:300px" th:text="${item.materaId}"></td>
-                <td class="small text-truncate" style="max-width:360px" th:text="${item.localPath}"></td>
+                <td class="small font-monospace text-truncate" style="max-width:360px"
+                    th:text="${#strings.startsWith(item.localPath, exportedRoot) ? #strings.substringAfter(item.localPath, exportedRoot) : item.localPath}"></td>
                 <td>
                     <a th:href="@{/files/{id}(id=${item.id})}" target="_blank"
                        class="btn btn-sm btn-outline-secondary"><i class="bi bi-download"></i></a>
@@ -335,11 +427,16 @@
         // Show/hide cancel button
         let cancelForm = banner.querySelector('form[action="/export/all/emails/cancel"]');
         if (s.running && !cancelForm) {
+            const params = new URLSearchParams(location.search);
+            const curTab = params.get('tab') || 'email';
+            const curFilter = params.get('filter') || 'pending';
             cancelForm = document.createElement('form');
             cancelForm.method = 'post';
             cancelForm.action = '/export/all/emails/cancel';
             cancelForm.style.display = 'inline';
-            cancelForm.innerHTML = '<button type="submit" class="btn btn-sm btn-outline-danger">'
+            cancelForm.innerHTML = '<input type="hidden" name="tab" value="' + curTab + '">'
+                + '<input type="hidden" name="filter" value="' + curFilter + '">'
+                + '<button type="submit" class="btn btn-sm btn-outline-danger">'
                 + '<i class="bi bi-stop-circle me-1"></i>Cancel</button>';
             banner.querySelector('.d-flex').appendChild(cancelForm);
         } else if (!s.running && cancelForm) {
@@ -365,6 +462,168 @@
     // Start polling immediately if job is running at page load
     if (banner && banner.dataset.running === 'true') {
         startPolling();
+    }
+})();
+
+// ── Bulk document export polling ──────────────────────────────────────────────
+(function () {
+    const banner = document.getElementById('bulk-doc-status-banner');
+    let pollInterval = null;
+
+    function phaseClass(phase) {
+        if (phase === 'running') return 'alert-info';
+        if (phase === 'done')    return 'alert-success';
+        if (phase === 'failed')  return 'alert-danger';
+        return 'alert-warning';
+    }
+
+    function updateBanner(s) {
+        if (s.phase === 'idle') {
+            if (banner) banner.style.display = 'none';
+            return;
+        }
+        if (!banner) { location.reload(); return; }
+
+        banner.style.display = '';
+        banner.classList.remove('alert-info', 'alert-success', 'alert-danger', 'alert-warning');
+        banner.classList.add(phaseClass(s.phase));
+
+        const spinner = banner.querySelector('.spinner-border');
+        if (s.running) {
+            if (!spinner) {
+                const sp = document.createElement('span');
+                sp.className = 'spinner-border spinner-border-sm';
+                sp.setAttribute('role', 'status');
+                banner.querySelector('.d-flex').prepend(sp);
+            }
+        } else {
+            if (spinner) spinner.remove();
+        }
+
+        const folders = document.getElementById('bulk-doc-folders');
+        const docs    = document.getElementById('bulk-doc-docs');
+        const errors  = document.getElementById('bulk-doc-errors');
+        const lastErr = document.getElementById('bulk-doc-last-error');
+        if (folders) folders.textContent = s.foldersProcessed;
+        if (docs)    docs.textContent    = s.documentsProcessed;
+        if (errors)  errors.textContent  = s.errorsCount;
+        if (lastErr) lastErr.textContent = s.lastError || '';
+
+        let cancelForm = banner.querySelector('form[action="/export/all/documents/cancel"]');
+        if (s.running && !cancelForm) {
+            const params = new URLSearchParams(location.search);
+            const curTab = params.get('tab') || 'email';
+            const curFilter = params.get('filter') || 'pending';
+            cancelForm = document.createElement('form');
+            cancelForm.method = 'post';
+            cancelForm.action = '/export/all/documents/cancel';
+            cancelForm.style.display = 'inline';
+            cancelForm.innerHTML = '<input type="hidden" name="tab" value="' + curTab + '">'
+                + '<input type="hidden" name="filter" value="' + curFilter + '">'
+                + '<button type="submit" class="btn btn-sm btn-outline-danger">'
+                + '<i class="bi bi-stop-circle me-1"></i>Cancel</button>';
+            banner.querySelector('.d-flex').appendChild(cancelForm);
+        } else if (!s.running && cancelForm) {
+            cancelForm.remove();
+        }
+    }
+
+    function startPolling() {
+        if (pollInterval) return;
+        pollInterval = setInterval(async () => {
+            try {
+                const resp = await fetch('/export/all/documents/status');
+                const s = await resp.json();
+                updateBanner(s);
+                if (!s.running) { clearInterval(pollInterval); pollInterval = null; }
+            } catch (_) { /* ignore */ }
+        }, 1000);
+    }
+
+    if (banner && banner.dataset.running === 'true') {
+        startPolling();
+    }
+})();
+
+// ── Auto-export polling & toasts ──────────────────────────────────────────────
+(function () {
+    const panel = document.getElementById('auto-export-panel');
+    if (!panel) return;
+
+    let knownEventCount = parseInt(panel.dataset.events || '0', 10);
+    let autoInterval = null;
+
+    function showToast(event) {
+        const container = document.getElementById('toast-container');
+        if (!container) return;
+        const id = 'toast-' + Date.now();
+        const time = new Date(event.at).toLocaleTimeString();
+        const html = `
+            <div id="${id}" class="toast align-items-center text-bg-success border-0" role="alert">
+                <div class="d-flex">
+                    <div class="toast-body">
+                        <i class="bi bi-google me-1"></i>
+                        <strong>Auto-exported</strong> thread ${event.threadId}
+                        &nbsp;·&nbsp;${event.emailCount} email(s)
+                        <div class="small opacity-75 text-truncate" style="max-width:260px">${event.subject || ''}</div>
+                        <div class="small opacity-75">${time}</div>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                </div>
+            </div>`;
+        container.insertAdjacentHTML('beforeend', html);
+        const el = document.getElementById(id);
+        new bootstrap.Toast(el, { delay: 8000 }).show();
+        el.addEventListener('hidden.bs.toast', () => el.remove());
+    }
+
+    function updateAutoPanel(s) {
+        // Update badge
+        const badge = panel.querySelector('.badge');
+        if (badge) {
+            if (s.enabled) {
+                badge.className = 'badge bg-success d-flex align-items-center gap-1';
+                badge.innerHTML = '<span class="spinner-grow spinner-grow-sm" style="width:.5rem;height:.5rem" role="status"></span> ON';
+            } else {
+                badge.className = 'badge bg-secondary';
+                badge.textContent = 'OFF';
+            }
+        }
+
+        // Update last-check time
+        const lastCheck = document.getElementById('auto-last-check');
+        if (lastCheck && s.lastCheck) {
+            const t = new Date(s.lastCheck * 1000 || s.lastCheck).toLocaleTimeString();
+            lastCheck.textContent = 'checked ' + t;
+        }
+
+        // Show toasts for new events
+        if (s.recentEvents && s.recentEvents.length > knownEventCount) {
+            const newEvents = s.recentEvents.slice(0, s.recentEvents.length - knownEventCount);
+            newEvents.forEach(showToast);
+            knownEventCount = s.recentEvents.length;
+        }
+
+        // Start/stop polling based on enabled state
+        if (s.enabled && !autoInterval) {
+            autoInterval = setInterval(pollAutoStatus, 5000);
+        } else if (!s.enabled && autoInterval) {
+            clearInterval(autoInterval);
+            autoInterval = null;
+        }
+    }
+
+    async function pollAutoStatus() {
+        try {
+            const resp = await fetch('/auto-export/status');
+            const s = await resp.json();
+            updateAutoPanel(s);
+        } catch (_) { /* ignore transient fetch errors */ }
+    }
+
+    // Start polling if already enabled at page load
+    if (panel.dataset.enabled === 'true') {
+        autoInterval = setInterval(pollAutoStatus, 5000);
     }
 })();
 </script>

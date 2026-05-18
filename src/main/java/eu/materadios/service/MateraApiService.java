@@ -82,6 +82,24 @@ public class MateraApiService {
         }
     }
 
+    /**
+     * Follows one redirect from the given Matera URL and returns the resolved location
+     * (typically an S3 pre-signed URL) without downloading the file body.
+     * Returns the original URL unchanged if no redirect is found.
+     */
+    public String resolveRedirect(String url) throws IOException {
+        try {
+            HttpClient noRedirect = HttpClient.newBuilder()
+                    .followRedirects(HttpClient.Redirect.NEVER).build();
+            HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url))
+                    .header("Cookie", authService.getCookieHeader()).GET().build();
+            HttpResponse<Void> resp = noRedirect.send(req, BodyHandlers.discarding());
+            return resp.headers().firstValue("location").orElse(url);
+        } catch (InterruptedException e) {
+            throw new IOException(e);
+        }
+    }
+
     public List<MateraBankAccount> getBankAccounts() {
         return callApi(
                 "accounts/bank_accounts?includes[bank_account][]=balance&includes[bank_account][]=unreconciled_bank_operations_count",
@@ -98,6 +116,10 @@ public class MateraApiService {
 
     public BuildingConfig getBuildingConfig(long buildingId) {
         return callApi("buildings/" + buildingId + "/config?includes[csm]=true", BuildingConfig.class);
+    }
+
+    public DocumentFolder getDocumentFolder(long id) {
+        return callApi("document_folders/" + id, DocumentFolder.class);
     }
 
     public List<DocumentFolder> getDocumentFolders(Long parentId) {

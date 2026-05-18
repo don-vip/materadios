@@ -47,6 +47,8 @@ import eu.materadios.api.TopicsResponse;
 import eu.materadios.model.ExportedItem;
 import eu.materadios.model.ProjectLabel;
 import eu.materadios.repository.ProjectLabelRepository;
+import eu.materadios.service.AutoExportService;
+import eu.materadios.service.BulkDocumentExportService;
 import eu.materadios.service.BulkEmailExportService;
 import eu.materadios.service.ExportService;
 import eu.materadios.service.GoogleService;
@@ -64,15 +66,21 @@ public class WebController {
     private final GoogleService googleService;
     private final ProjectLabelRepository projectLabelRepository;
     private final BulkEmailExportService bulkEmailExportService;
+    private final BulkDocumentExportService bulkDocumentExportService;
+    private final AutoExportService autoExportService;
 
     public WebController(ExportService exportService, MateraApiService materaApiService,
             GoogleService googleService, ProjectLabelRepository projectLabelRepository,
-            BulkEmailExportService bulkEmailExportService) {
+            BulkEmailExportService bulkEmailExportService,
+            BulkDocumentExportService bulkDocumentExportService,
+            AutoExportService autoExportService) {
         this.exportService = exportService;
         this.materaApiService = materaApiService;
         this.googleService = googleService;
         this.projectLabelRepository = projectLabelRepository;
         this.bulkEmailExportService = bulkEmailExportService;
+        this.bulkDocumentExportService = bulkDocumentExportService;
+        this.autoExportService = autoExportService;
     }
 
     @GetMapping("/")
@@ -117,6 +125,9 @@ public class WebController {
         long docTotal = all.stream().filter(e -> "DOCUMENT".equals(e.getType())).count();
         long attTotal = all.stream().filter(e -> "EMAIL_ATTACHMENT".equals(e.getType())).count();
 
+        String exportedRoot = Paths.get("data", "exported").toAbsolutePath().toString()
+                + java.io.File.separator;
+
         model.addAttribute("tab", tab);
         model.addAttribute("filter", filter);
         model.addAttribute("threadGroups", threadGroups);
@@ -125,8 +136,35 @@ public class WebController {
         model.addAttribute("emailTotal", emailTotal);
         model.addAttribute("docTotal", docTotal);
         model.addAttribute("attTotal", attTotal);
+        model.addAttribute("exportedRoot", exportedRoot);
         model.addAttribute("bulkStatus", bulkEmailExportService.getStatus());
+        model.addAttribute("bulkDocStatus", bulkDocumentExportService.getStatus());
+        model.addAttribute("autoStatus", autoExportService.getStatus());
         return "index";
+    }
+
+    @PostMapping("/auto-export/enable")
+    public String enableAutoExport(
+            @RequestParam(defaultValue = "email") String tab,
+            @RequestParam(defaultValue = "pending") String filter,
+            RedirectAttributes ra) {
+        autoExportService.enable();
+        return "redirect:/?tab=" + tab + "&filter=" + filter;
+    }
+
+    @PostMapping("/auto-export/disable")
+    public String disableAutoExport(
+            @RequestParam(defaultValue = "email") String tab,
+            @RequestParam(defaultValue = "pending") String filter,
+            RedirectAttributes ra) {
+        autoExportService.disable();
+        return "redirect:/?tab=" + tab + "&filter=" + filter;
+    }
+
+    @GetMapping(value = "/auto-export/status", produces = "application/json")
+    @ResponseBody
+    public AutoExportService.Status autoExportStatus() {
+        return autoExportService.getStatus();
     }
 
     private static String stackTrace(Throwable ex) {
@@ -412,20 +450,54 @@ public class WebController {
         return "topics";
     }
 
+    @PostMapping("/export/all/documents")
+    public String exportAllDocuments(
+            @RequestParam(defaultValue = "email") String tab,
+            @RequestParam(defaultValue = "pending") String filter,
+            RedirectAttributes ra) {
+        boolean started = bulkDocumentExportService.start();
+        if (!started) {
+            ra.addFlashAttribute("error", "A document export job is already running.");
+        }
+        return "redirect:/?tab=" + tab + "&filter=" + filter;
+    }
+
+    @PostMapping("/export/all/documents/cancel")
+    public String cancelExportAllDocuments(
+            @RequestParam(defaultValue = "email") String tab,
+            @RequestParam(defaultValue = "pending") String filter,
+            RedirectAttributes ra) {
+        bulkDocumentExportService.cancel();
+        ra.addFlashAttribute("message", "Cancellation requested — the job will stop after the current document.");
+        return "redirect:/?tab=" + tab + "&filter=" + filter;
+    }
+
+    @GetMapping(value = "/export/all/documents/status", produces = "application/json")
+    @ResponseBody
+    public BulkDocumentExportService.Status exportAllDocumentsStatus() {
+        return bulkDocumentExportService.getStatus();
+    }
+
     @PostMapping("/export/all/emails")
-    public String exportAllEmails(RedirectAttributes ra) {
+    public String exportAllEmails(
+            @RequestParam(defaultValue = "email") String tab,
+            @RequestParam(defaultValue = "pending") String filter,
+            RedirectAttributes ra) {
         boolean started = bulkEmailExportService.start();
         if (!started) {
             ra.addFlashAttribute("error", "An export job is already running.");
         }
-        return "redirect:/";
+        return "redirect:/?tab=" + tab + "&filter=" + filter;
     }
 
     @PostMapping("/export/all/emails/cancel")
-    public String cancelExportAllEmails(RedirectAttributes ra) {
+    public String cancelExportAllEmails(
+            @RequestParam(defaultValue = "email") String tab,
+            @RequestParam(defaultValue = "pending") String filter,
+            RedirectAttributes ra) {
         bulkEmailExportService.cancel();
         ra.addFlashAttribute("message", "Cancellation requested — the job will stop after the current thread.");
-        return "redirect:/";
+        return "redirect:/?tab=" + tab + "&filter=" + filter;
     }
 
     @GetMapping(value = "/export/all/emails/status", produces = "application/json")
@@ -435,7 +507,10 @@ public class WebController {
     }
 
     @PostMapping("/export/item/{id}")
-    public String exportItem(@PathVariable Long id, RedirectAttributes ra) {
+    public String exportItem(@PathVariable Long id,
+            @RequestParam(defaultValue = "email") String tab,
+            @RequestParam(defaultValue = "pending") String filter,
+            RedirectAttributes ra) {
         try {
             exportService.exportItemToGoogle(id);
             ra.addFlashAttribute("message", "Started export for item " + id + ".");
@@ -444,11 +519,28 @@ public class WebController {
             ra.addFlashAttribute("error", "Export failed: " + ex.getMessage());
             ra.addFlashAttribute("errorDetail", stackTrace(ex));
         }
-        return "redirect:/";
+        return "redirect:/?tab=" + tab + "&filter=" + filter;
+    }
+
+    @PostMapping("/admin/reset/document/{id}")
+    public String resetDocumentExported(@PathVariable Long id,
+            @RequestParam(defaultValue = "pending") String filter,
+            RedirectAttributes ra) {
+        try {
+            exportService.resetDocumentExported(id);
+            ra.addFlashAttribute("message", "Document " + id + " reset — ready to re-export to Drive.");
+        } catch (Exception ex) {
+            log.error("resetDocumentExported {} failed", id, ex);
+            ra.addFlashAttribute("error", "Reset failed: " + ex.getMessage());
+            ra.addFlashAttribute("errorDetail", stackTrace(ex));
+        }
+        return "redirect:/?tab=document&filter=" + filter;
     }
 
     @PostMapping("/admin/reset/thread/{threadId}")
-    public String resetThreadExported(@PathVariable long threadId, RedirectAttributes ra) {
+    public String resetThreadExported(@PathVariable long threadId,
+            @RequestParam(defaultValue = "pending") String filter,
+            RedirectAttributes ra) {
         try {
             exportService.resetAndReexportThread(threadId);
             ra.addFlashAttribute("message", "Thread " + threadId + " reset and re-exported to disk — ready to import to Gmail.");
@@ -457,7 +549,7 @@ public class WebController {
             ra.addFlashAttribute("error", "Reset failed: " + ex.getMessage());
             ra.addFlashAttribute("errorDetail", stackTrace(ex));
         }
-        return "redirect:/?tab=email&filter=pending";
+        return "redirect:/?tab=email&filter=" + filter;
     }
 
     @PostMapping("/export/google/thread/{threadId}")
@@ -508,7 +600,10 @@ public class WebController {
     }
 
     @PostMapping("/admin/purge/database")
-    public String purgeDatabase(RedirectAttributes ra) {
+    public String purgeDatabase(
+            @RequestParam(defaultValue = "email") String tab,
+            @RequestParam(defaultValue = "pending") String filter,
+            RedirectAttributes ra) {
         try {
             exportService.purgeDatabase();
             ra.addFlashAttribute("message", "Local database purged.");
@@ -517,11 +612,14 @@ public class WebController {
             ra.addFlashAttribute("error", "Database purge failed: " + ex.getMessage());
             ra.addFlashAttribute("errorDetail", stackTrace(ex));
         }
-        return "redirect:/";
+        return "redirect:/?tab=" + tab + "&filter=" + filter;
     }
 
     @PostMapping("/admin/purge/files")
-    public String purgeFiles(RedirectAttributes ra) {
+    public String purgeFiles(
+            @RequestParam(defaultValue = "email") String tab,
+            @RequestParam(defaultValue = "pending") String filter,
+            RedirectAttributes ra) {
         try {
             exportService.purgeLocalFiles();
             ra.addFlashAttribute("message", "Local files purged.");
@@ -530,7 +628,7 @@ public class WebController {
             ra.addFlashAttribute("error", "File purge failed: " + ex.getMessage());
             ra.addFlashAttribute("errorDetail", stackTrace(ex));
         }
-        return "redirect:/";
+        return "redirect:/?tab=" + tab + "&filter=" + filter;
     }
 
     @GetMapping("/matera/documents")

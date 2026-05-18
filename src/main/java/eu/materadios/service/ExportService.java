@@ -16,8 +16,10 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
@@ -42,6 +44,9 @@ import tools.jackson.databind.ObjectMapper;
 public class ExportService {
 
     private static final Logger log = LoggerFactory.getLogger(ExportService.class);
+
+    // Cache: Matera folder ID → Drive folder ID, built lazily during document exports
+    private final Map<Long, String> driveFolderCache = new HashMap<>();
 
     private static final DateTimeFormatter RFC_2822 =
             DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss Z", Locale.ENGLISH);
@@ -81,7 +86,7 @@ public class ExportService {
 
         String url;
         if ("DOCUMENT".equalsIgnoreCase(e.getType())) {
-            url = googleService.uploadFileToDrive(e.getLocalPath());
+            url = exportDocumentToDrive(e);
         } else if ("EMAIL".equalsIgnoreCase(e.getType())) {
             url = exportEmailToGmail(e);
         } else {
@@ -92,6 +97,69 @@ public class ExportService {
         e.setExportedAt(Instant.now());
         repository.save(e);
         return e;
+    }
+
+    private String exportDocumentToDrive(ExportedItem e) {
+        try {
+            Document doc = new ObjectMapper().readValue(e.getMetadataJson(), Document.class);
+            String parentFolderId = resolveDriveFolder(doc.folder_id());
+            String resolvedUrl = doc.file() != null && doc.file().url() != null
+                    ? materaApiService.resolveRedirect(doc.file().url()) : null;
+            return googleService.uploadFileToDrive(e.getLocalPath(), parentFolderId, doc, resolvedUrl);
+        } catch (Exception ex) {
+            throw new RuntimeException("Failed to upload document to Drive", ex);
+        }
+    }
+
+    private synchronized String resolveDriveFolder(Long materaFolderId) {
+        if (materaFolderId == null) {
+            return googleService.getRootDriveFolderId();
+        }
+        if (driveFolderCache.containsKey(materaFolderId)) {
+            return driveFolderCache.get(materaFolderId);
+        }
+        DocumentFolder folder = materaApiService.getDocumentFolder(materaFolderId);
+        String parentDriveId = resolveDriveFolder(folder.parent_id());
+        String driveFolderId = googleService.getOrCreateDriveFolder(folder.name(), parentDriveId);
+        driveFolderCache.put(materaFolderId, driveFolderId);
+        return driveFolderId;
+    }
+
+    @Transactional
+    public void resetDocumentExported(Long id) {
+        repository.findById(id).ifPresent(e -> {
+            try {
+                long docId = Long.parseLong(e.getMateraId().replace("document:", ""));
+                Document doc = materaApiService.getDocument(docId);
+
+                String folderSegment = doc.folder_id() != null ? String.valueOf(doc.folder_id()) : "root";
+                Path dir = Paths.get("data", "exported", "documents", folderSegment);
+                Files.createDirectories(dir);
+
+                String baseName = sanitizeFilename(doc.name());
+                String ext = extractExtension(doc.file());
+                String filename = (ext.isEmpty() || baseName.toLowerCase().endsWith(ext)) ? baseName : baseName + ext;
+                Path newPath = dir.resolve(filename).toAbsolutePath();
+
+                // Delete old file if it has a different (bad) name
+                Path oldPath = e.getLocalPath() != null ? Path.of(e.getLocalPath()) : null;
+                if (oldPath != null && !oldPath.equals(newPath)) {
+                    Files.deleteIfExists(oldPath);
+                }
+
+                byte[] bytes = materaApiService.downloadFile(doc.file().url());
+                Files.write(newPath, bytes);
+
+                e.setLocalPath(newPath.toString());
+                e.setExported(false);
+                e.setGoogleUrl(null);
+                e.setExportedAt(null);
+                repository.save(e);
+                log.info("Reset document {} → {}", docId, newPath);
+            } catch (IOException ex) {
+                throw new RuntimeException("Failed to re-download document for reset", ex);
+            }
+        });
     }
 
     private String exportEmailToGmail(ExportedItem e) {
@@ -185,6 +253,17 @@ public class ExportService {
 
     @Transactional
     public void exportMailboxThread(MailboxThread thread) throws IOException {
+        doExportMailboxThread(thread, false);
+    }
+
+    // onlyNew=true: skips emails already on disk and preserves their Gmail exported state.
+    // Used by auto-export to handle new replies in existing threads.
+    @Transactional
+    public void exportMailboxThreadOnlyNew(MailboxThread thread) throws IOException {
+        doExportMailboxThread(thread, true);
+    }
+
+    private void doExportMailboxThread(MailboxThread thread, boolean onlyNew) throws IOException {
         long threadId = thread.id();
         Path base = Paths.get("data", "exported", "mailbox_threads", String.valueOf(threadId));
         Files.createDirectories(base);
@@ -195,6 +274,11 @@ public class ExportService {
             return;
 
         for (MailboxThread.Email email : emails) {
+            String emailMateraId = "mailbox_thread:" + threadId + ":email:" + email.id();
+            if (onlyNew && repository.existsByMateraId(emailMateraId)) {
+                continue; // already on disk — preserve its Gmail exported state
+            }
+
             // Download attachments
             List<String> attLocalPaths = new ArrayList<>();
             List<MailboxThread.Attachment> downloadedAtts = new ArrayList<>();
@@ -233,16 +317,18 @@ public class ExportService {
             Path file = base.resolve("email-" + email.id() + ".eml").toAbsolutePath();
             Files.write(file, buildEml(email, downloadedAtts, downloadedContents));
 
-            String emailMateraId = "mailbox_thread:" + threadId + ":email:" + email.id();
             ExportedItem it = repository.findByMateraId(emailMateraId).orElse(new ExportedItem());
             it.setMateraId(emailMateraId);
             it.setType("EMAIL");
             it.setLocalPath(file.toString());
             it.setMetadataJson(mapper.writeValueAsString(new MailboxExportMetadata(thread, email, attLocalPaths)));
-            // Reset export state so the fresh EML can be re-imported to Gmail
-            it.setExported(false);
-            it.setGoogleUrl(null);
-            it.setExportedAt(null);
+            if (!onlyNew) {
+                // Full re-export: reset Gmail state so the fresh EML gets re-imported
+                it.setExported(false);
+                it.setGoogleUrl(null);
+                it.setExportedAt(null);
+            }
+            // onlyNew: new item starts with exported=null (treated as false) — ready for Gmail import
             repository.save(it);
         }
     }
@@ -399,7 +485,9 @@ public class ExportService {
         Path dir = Paths.get("data", "exported", "documents", folderSegment);
         Files.createDirectories(dir);
 
-        String filename = sanitizeFilename(doc.name()) + extractExtension(doc.file());
+        String baseName = sanitizeFilename(doc.name());
+        String ext = extractExtension(doc.file());
+        String filename = (ext.isEmpty() || baseName.toLowerCase().endsWith(ext)) ? baseName : baseName + ext;
         Path filePath = dir.resolve(filename).toAbsolutePath();
 
         byte[] bytes = materaApiService.downloadFile(doc.file().url());
@@ -479,6 +567,10 @@ public class ExportService {
     public boolean isThreadOnDisk(long threadId) {
         return repository.findByMateraIdStartingWith("mailbox_thread:" + threadId + ":email:").stream()
                 .anyMatch(e -> "EMAIL".equals(e.getType()));
+    }
+
+    public boolean isEmailOnDisk(long threadId, long emailId) {
+        return repository.existsByMateraId("mailbox_thread:" + threadId + ":email:" + emailId);
     }
 
     public Set<Long> exportedMailboxThreadIds() {
